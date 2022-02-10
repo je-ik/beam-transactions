@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package cz.datadriven.beam.transaction.proto;
+
+message Request {
+  int64 uid = 1;
+  string requestUid = 2;
+  string responseHost = 3;
+  int32 responsePort = 4;
+}
+
+message Response {
+  int64 uid = 1;
+  string requestUid = 2;
+}
+
+message ServerAck {
+  uint64 uid = 1;
+  uint32 status = 2;
+}
+
+message ClientAck {
+  uint64 uid = 1;
+  uint32 status = 2;
+}
+
+service TransactionServer {
+  rpc stream(stream Request) returns (stream ServerAck); 
+}
+
+service TransactionClient {
+  rpc stream(stream Response) returns (stream ClientAck);
+}
