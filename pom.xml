@@ -29,12 +29,16 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
+    <autoservice.version>1.0</autoservice.version>
     <beam.version>2.36.0</beam.version>
-    <grpc.version>1.37.2</grpc.version>
+    <error-prone.version>2.4.0</error-prone.version>
+    <grpc.version>1.41.1</grpc.version>
     <hamcrest.version>2.2</hamcrest.version>
     <jupiter.version>5.7.1</jupiter.version>
-    <maven-ext-os.version>1.6.2</maven-ext-os.version>
+    <log4j.version>2.17.1</log4j.version>
+    <lombok.version>1.18.22</lombok.version>
     <maven-compiler-plugin.version>3.8.1</maven-compiler-plugin.version>
+    <maven-ext-os.version>1.6.2</maven-ext-os.version>
     <maven-protobuf-plugin.version>0.6.1</maven-protobuf-plugin.version>
     <maven-shade-plugin.version>3.2.4</maven-shade-plugin.version>
     <maven-surefire-plugin.version>3.0.0-M5</maven-surefire-plugin.version>
@@ -45,7 +49,7 @@
   </properties>
 
   <build>
-
+    
     <extensions>
       <extension>
         <groupId>kr.motd.maven</groupId>
@@ -62,6 +66,29 @@
         <configuration>
           <source>11</source>
           <target>11</target>
+          <compilerArgs>
+            <arg>-XDcompilePolicy=simple</arg>
+            <!-- workaround of https://github.com/google/error-prone/issues/1321 -->
+            <arg>-Xplugin:ErrorProne -Xep:ParameterName:OFF -Xep:UnusedVariable:OFF</arg>
+            <arg>-Xlint:all</arg>
+          </compilerArgs>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>com.google.errorprone</groupId>
+              <artifactId>error_prone_core</artifactId>
+              <version>${error-prone.version}</version>
+            </path>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+            <path>
+              <groupId>com.google.auto.service</groupId>
+              <artifactId>auto-service</artifactId>
+              <version>${autoservice.version}</version>
+            </path>
+          </annotationProcessorPaths>
         </configuration>
       </plugin>
 
@@ -84,6 +111,7 @@
             <goals>
               <goal>compile</goal>
               <goal>test-compile</goal>
+              <goal>compile-custom</goal>
             </goals>
           </execution>
         </executions>
@@ -124,7 +152,7 @@
         <version>${maven-surefire-plugin.version}</version>
         <configuration>
           <parallel>all</parallel>
-          <threadCount>4</threadCount>
+          <threadCount>1</threadCount>
         </configuration>
       </plugin>
 
@@ -162,10 +190,55 @@
   </build>
 
   <dependencies>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.apache.beam</groupId>
       <artifactId>beam-sdks-java-core</artifactId>
       <version>${beam.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+      <version>${proto.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-core</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-stub</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-protobuf</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-netty</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.google.auto.service</groupId>
+      <artifactId>auto-service</artifactId>
+      <version>${autoservice.version}</version>
+      <scope>provided</scope>
     </dependency>
 
     <dependency>
@@ -193,10 +266,37 @@
       <scope>test</scope>
     </dependency>
 
+    <!--dependency>
+      <groupId>org.apache.beam</groupId>
+      <artifactId>beam-runners-flink-1.13</artifactId>
+      <version>${beam.version}</version>
+      <scope>test</scope>
+    </dependency-->
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>
       <version>${jupiter.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>javax.annotation</groupId>
+      <artifactId>javax.annotation-api</artifactId>
+      <version>1.3.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j-impl</artifactId>
+      <version>${log4j.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <version>${log4j.version}</version>
       <scope>test</scope>
     </dependency>
 
