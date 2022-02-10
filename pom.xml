@@ -33,9 +33,11 @@
     <grpc.version>1.37.2</grpc.version>
     <hamcrest.version>2.2</hamcrest.version>
     <jupiter.version>5.7.1</jupiter.version>
+    <maven-ext-os.version>1.6.2</maven-ext-os.version>
     <maven-compiler-plugin.version>3.8.1</maven-compiler-plugin.version>
-    <maven-surefire-plugin.version>3.0.0-M5</maven-surefire-plugin.version>
+    <maven-protobuf-plugin.version>0.6.1</maven-protobuf-plugin.version>
     <maven-shade-plugin.version>3.2.4</maven-shade-plugin.version>
+    <maven-surefire-plugin.version>3.0.0-M5</maven-surefire-plugin.version>
     <proto.version>3.19.2</proto.version>
     <protoc.version>3.19.2</protoc.version>
     <slf4j.version>1.7.30</slf4j.version>
@@ -43,6 +45,15 @@
   </properties>
 
   <build>
+
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>${maven-ext-os.version}</version>
+      </extension>
+    </extensions>
+
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -52,6 +63,30 @@
           <source>11</source>
           <target>11</target>
         </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.xolstice.maven.plugins</groupId>
+        <artifactId>protobuf-maven-plugin</artifactId>
+        <version>${maven-protobuf-plugin.version}</version>
+        <configuration>
+          <protocArtifact>
+            com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}
+          </protocArtifact>
+          <pluginId>grpc-java</pluginId>
+          <pluginArtifact>
+            io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}
+          </pluginArtifact>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>generate-sources</phase>
+            <goals>
+              <goal>compile</goal>
+              <goal>test-compile</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
 
       <plugin>
