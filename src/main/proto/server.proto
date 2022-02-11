@@ -2,16 +2,61 @@ syntax = "proto3";
 
 package cz.datadriven.beam.transaction.proto;
 
+message KeyValue {
+  string key = 1;
+  double value = 2;
+  // used internally
+  uint64 seqId = 3;
+}
+
+message ReadPayload {
+  // keys whose current amounts to read
+  repeated string key = 1;
+}
+
+message WritePayload {
+  repeated KeyValue keyvalue = 1;
+}
+
 message Request {
+
+  enum Type {
+    UNKNOWN = 0;
+    BEGIN = 1;
+    READ = 2;
+    WRITE = 3;
+    COMMIT = 4;
+  }
+
   int64 uid = 1;
   string requestUid = 2;
   string responseHost = 3;
   int32 responsePort = 4;
+  // might be missing when type is BEGIN
+  string transactionId = 5;
+
+  Type type = 6;
+  ReadPayload readPayload = 7;
+  WritePayload writePayload = 8;
+
+  // internal
+  uint64 seqId = 9;
 }
 
 message Response {
+
   int64 uid = 1;
   string requestUid = 2;
+
+  // 200 = OK
+  // 412 = Precondition failed = transaction was rejected (response to COMMIT)
+  uint32 status = 3;
+
+  // response to BEGIN request
+  string transactionId = 4;
+
+  // response to READ request
+  repeated KeyValue keyvalue = 5;
 }
 
 message ServerAck {

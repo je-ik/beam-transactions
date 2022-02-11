@@ -33,6 +33,7 @@
     <beam.version>2.36.0</beam.version>
     <error-prone.version>2.4.0</error-prone.version>
     <grpc.version>1.41.1</grpc.version>
+    <guava.version>31.0.1-jre</guava.version>
     <hamcrest.version>2.2</hamcrest.version>
     <jupiter.version>5.7.1</jupiter.version>
     <log4j.version>2.17.1</log4j.version>
@@ -190,6 +191,12 @@
   </build>
 
   <dependencies>
+
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>${guava.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.projectlombok</groupId>
