@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.google.protobuf.TextFormat;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Response;
 import java.util.UUID;
@@ -44,27 +45,28 @@ public class GrpcResponseWriteTest {
   String testUuid;
 
   @BeforeEach
-  public void setup() {
+  void setup() {
     testUuid = UUID.randomUUID().toString();
-    Utils.startTest(testUuid);
+    TestUtils.startTest(testUuid);
   }
 
   @Test
   @Timeout(15)
-  public void testResponse() throws ExecutionException, InterruptedException, TimeoutException {
+  void testResponse() throws ExecutionException, InterruptedException, TimeoutException {
     Pipeline p = Pipeline.create();
-    p.apply(GrpcRequestRead.of(Utils.getMaxRequestsFn(testUuid, 1)))
+    p.apply(GrpcRequestRead.of(TestUtils.getMaxRequestsFn(testUuid, 1)))
         .apply(
             MapElements.into(
                     TypeDescriptors.kvs(
-                        TypeDescriptors.strings(), TypeDescriptor.of(Response.class)))
+                        TypeDescriptors.strings(), TypeDescriptor.of(Internal.class)))
                 .via(
                     request -> {
-                      Response res =
-                          Response.newBuilder().setRequestUid(request.getRequestUid()).build();
                       log.info("Have request {}", TextFormat.shortDebugString(request));
                       return KV.of(
-                          request.getResponseHost() + ":" + request.getResponsePort(), res);
+                          request.getRequest().getResponseHost()
+                              + ":"
+                              + request.getRequest().getResponsePort(),
+                          request);
                     }))
         .apply(GrpcResponseWrite.of());
     CompletableFuture<PipelineResult> future = CompletableFuture.supplyAsync(p::run);

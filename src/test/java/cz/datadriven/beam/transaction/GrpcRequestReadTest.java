@@ -18,6 +18,7 @@ package cz.datadriven.beam.transaction;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import java.util.ArrayList;
@@ -48,23 +49,23 @@ public class GrpcRequestReadTest {
   String testUuid;
 
   @BeforeEach
-  public void setup() {
+  void setup() {
     testUuid = UUID.randomUUID().toString();
-    Utils.startTest(testUuid);
+    TestUtils.startTest(testUuid);
   }
 
   @Test
   @Timeout(15)
-  public void testRun() throws ExecutionException, InterruptedException {
-    Pipeline p = TransactionRunner.reqisterCoders(Pipeline.create());
+  void testRun() throws ExecutionException, InterruptedException {
+    Pipeline p = TransactionRunner.registerCoders(Pipeline.create());
     int numRequests = 10;
     SerializableFunction<Request, Instant> watermarkFn =
-        Utils.getMaxRequestsFn(testUuid, numRequests);
-    PCollection<Request> requests = p.apply(GrpcRequestRead.of(watermarkFn));
+        TestUtils.getMaxRequestsFn(testUuid, numRequests);
+    PCollection<Internal> requests = p.apply(GrpcRequestRead.of(watermarkFn));
     PCollection<Long> result =
         requests
             .apply(Window.into(FixedWindows.of(Duration.standardSeconds(1))))
-            .apply(Combine.globally(Count.<Request>combineFn()).withoutDefaults());
+            .apply(Combine.globally(Count.<Internal>combineFn()).withoutDefaults());
     PAssert.that(result).containsInAnyOrder((long) numRequests);
     CompletableFuture<Boolean> written =
         CompletableFuture.supplyAsync(

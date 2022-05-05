@@ -18,11 +18,20 @@ package cz.datadriven.beam.transaction;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.google.protobuf.GeneratedMessageV3;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server;
 import java.util.Set;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.Filter;
+import org.apache.beam.sdk.transforms.Flatten;
+import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.TypeDescriptors;
 
 /**
  * A runner for the transaction {@link org.apache.beam.sdk.Pipeline}.
@@ -44,17 +53,43 @@ public class TransactionRunner {
   }
 
   void run() {
-    Pipeline pipeline = reqisterCoders(Pipeline.create(opts));
-    pipeline.apply(GrpcRequestRead.of());
+    DatabaseAccessor accessor = createAccessor(opts);
+    Pipeline pipeline = registerCoders(Pipeline.create(opts));
+    PCollection<Internal> requests =
+        pipeline.apply(GrpcRequestRead.of()).apply(TransactionSeqIdAssign.of());
+    PCollection<Internal> readResponses =
+        requests
+            .apply(Filter.by(r -> r.getRequest().hasReadPayload()))
+            .apply(DatabaseRead.of(accessor));
+
+    PCollection<Internal> resolved =
+        PCollectionList.of(readResponses)
+            .and(requests.apply(Filter.by(r -> !r.getRequest().hasReadPayload())))
+            .apply(Flatten.pCollections());
+
+    resolved
+        .apply(
+            MapElements.into(
+                    TypeDescriptors.kvs(
+                        TypeDescriptors.strings(), TypeDescriptor.of(Internal.class)))
+                .via(r -> KV.of(r.getRequest().getRequestUid(), r)))
+        .apply(GrpcResponseWrite.of());
+    pipeline.run();
+  }
+
+  private DatabaseAccessor createAccessor(PipelineOptions opts) {
+    // FIXME
+    return new MemoryDatabaseAccessor();
   }
 
   @VisibleForTesting
-  static Pipeline reqisterCoders(Pipeline pipeline) {
+  static Pipeline registerCoders(Pipeline pipeline) {
     Set<GeneratedMessageV3> protos =
         Sets.newHashSet(
             Server.Request.getDefaultInstance(),
             Server.Response.getDefaultInstance(),
-            Server.ServerAck.getDefaultInstance());
+            Server.ServerAck.getDefaultInstance(),
+            Internal.getDefaultInstance());
     for (GeneratedMessageV3 m : protos) {
       pipeline.getCoderRegistry().registerCoderForClass(m.getClass(), ProtoCoder.of(m));
     }

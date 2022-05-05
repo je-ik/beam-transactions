@@ -17,7 +17,9 @@ package cz.datadriven.beam.transaction;
 
 import com.google.common.base.Preconditions;
 import com.google.protobuf.TextFormat;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.ClientAck;
+import cz.datadriven.beam.transaction.proto.Server.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.Response;
 import cz.datadriven.beam.transaction.proto.TransactionClientGrpc;
 import cz.datadriven.beam.transaction.proto.TransactionClientGrpc.TransactionClientStub;
@@ -26,6 +28,7 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.beam.sdk.state.StateSpec;
@@ -39,7 +42,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
 
 @Slf4j
-public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Response>>, PDone> {
+public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Internal>>, PDone> {
 
   public static GrpcResponseWrite of() {
     return new GrpcResponseWrite();
@@ -52,7 +55,7 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Respons
     StreamObserver<Response> observer;
   }
 
-  static class GrpcResponseWriteFn extends DoFn<KV<String, Response>, Void> {
+  static class GrpcResponseWriteFn extends DoFn<KV<String, Internal>, Void> {
 
     private final Map<String, ChannelWithObserver> openChannels = new ConcurrentHashMap<>();
 
@@ -66,7 +69,7 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Respons
 
     @RequiresStableInput
     @ProcessElement
-    public void process(@Element KV<String, Response> element) {
+    public void process(@Element KV<String, Internal> element) {
       ChannelWithObserver channelWithObserver =
           openChannels.computeIfAbsent(
               element.getKey(),
@@ -94,7 +97,23 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Respons
             TextFormat.shortDebugString(element.getValue()),
             channelWithObserver.getObserver());
       }
-      channelWithObserver.getObserver().onNext(element.getValue());
+      channelWithObserver.getObserver().onNext(toResponse(element.getValue()));
+    }
+
+    private Response toResponse(Internal value) {
+      return Response.newBuilder()
+          .setStatus(value.getStatus())
+          .setTransactionId(value.getTransactionId())
+          .setRequestUid(value.getRequest().getRequestUid())
+          .addAllKeyvalue(
+              value
+                  .getKeyValueList()
+                  .stream()
+                  .map(
+                      kv ->
+                          KeyValue.newBuilder().setKey(kv.getKey()).setValue(kv.getValue()).build())
+                  .collect(Collectors.toList()))
+          .build();
     }
 
     private StreamObserver<Response> newObserver(String key, TransactionClientStub stub) {
@@ -121,7 +140,7 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Respons
   }
 
   @Override
-  public PDone expand(PCollection<KV<String, Response>> input) {
+  public PDone expand(PCollection<KV<String, Internal>> input) {
     input.apply(ParDo.of(new GrpcResponseWriteFn()));
     return PDone.in(input.getPipeline());
   }

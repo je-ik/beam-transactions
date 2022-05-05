@@ -16,9 +16,7 @@
 package cz.datadriven.beam.transaction;
 
 import cz.datadriven.beam.transaction.DatabaseAccessor.Value;
-import cz.datadriven.beam.transaction.proto.Server.KeyValue;
-import cz.datadriven.beam.transaction.proto.Server.Request;
-import cz.datadriven.beam.transaction.proto.Server.Response;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -35,13 +33,13 @@ import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.joda.time.Duration;
 
-public class DatabaseRead extends PTransform<PCollection<Request>, PCollection<Response>> {
+public class DatabaseRead extends PTransform<PCollection<Internal>, PCollection<Internal>> {
 
   public static DatabaseRead of(DatabaseAccessor accessor) {
     return new DatabaseRead(accessor);
   }
 
-  private static class DatabaseReadFn extends DoFn<KV<Integer, Iterable<Request>>, Response> {
+  private static class DatabaseReadFn extends DoFn<KV<Integer, Iterable<Internal>>, Internal> {
 
     private final DatabaseAccessor accessor;
 
@@ -61,16 +59,12 @@ public class DatabaseRead extends PTransform<PCollection<Request>, PCollection<R
 
     @ProcessElement
     public void process(
-        @Element KV<Integer, Iterable<Request>> element, OutputReceiver<Response> output) {
-      Iterable<Request> requests = element.getValue();
-      Map<String, List<String>> grouped =
+        @Element KV<Integer, Iterable<Internal>> element, OutputReceiver<Internal> output) {
+
+      Iterable<Internal> requests = Objects.requireNonNull(element.getValue());
+      Map<Long, List<String>> grouped =
           StreamSupport.stream(requests.spliterator(), false)
-              .flatMap(
-                  r ->
-                      r.getReadPayload()
-                          .getKeyList()
-                          .stream()
-                          .map(k -> KV.of(r.getRequestUid(), k)))
+              .flatMap(r -> r.getKeyValueList().stream().map(k -> KV.of(r.getSeqId(), k.getKey())))
               .collect(
                   Collectors.groupingBy(
                       KV::getKey, Collectors.mapping(KV::getValue, Collectors.toList())));
@@ -78,19 +72,24 @@ public class DatabaseRead extends PTransform<PCollection<Request>, PCollection<R
           accessor
               .getBatch(
                   StreamSupport.stream(requests.spliterator(), false)
-                      .flatMap(r -> r.getReadPayload().getKeyList().stream())
+                      .flatMap(r -> r.getKeyValueList().stream().map(Internal.KeyValue::getKey))
                       .distinct())
               .collect(
                   Collectors.toMap(
                       KV::getKey,
                       kv -> kv.getValue() != null ? kv.getValue() : new Value(0.0, 0L)));
-      for (Request r : requests) {
-        Response.Builder builder = Response.newBuilder().setRequestUid(r.getRequestUid());
-        List<String> query = Objects.requireNonNull(grouped.get(r.getRequestUid()));
+      for (Internal r : requests) {
+        Internal.Builder builder = r.toBuilder().clearKeyValue();
+        List<String> query = Objects.requireNonNull(grouped.get(r.getSeqId()));
         query.forEach(
-            q ->
-                builder.addKeyvalue(
-                    KeyValue.newBuilder().setKey(q).setValue(resolved.get(q).getAmount())));
+            q -> {
+              Value value = resolved.get(q);
+              builder.addKeyValue(
+                  Internal.KeyValue.newBuilder()
+                      .setKey(q)
+                      .setValue(value.getAmount())
+                      .setSeqId(value.getSeqId()));
+            });
         output.output(builder.build());
       }
     }
@@ -103,15 +102,15 @@ public class DatabaseRead extends PTransform<PCollection<Request>, PCollection<R
   }
 
   @Override
-  public PCollection<Response> expand(PCollection<Request> input) {
+  public PCollection<Internal> expand(PCollection<Internal> input) {
     return input
         .apply(
             MapElements.into(
                     TypeDescriptors.kvs(
-                        TypeDescriptors.integers(), TypeDescriptor.of(Request.class)))
+                        TypeDescriptors.integers(), TypeDescriptor.of(Internal.class)))
                 .via(e -> KV.of(e.getTransactionId().hashCode() % 50, e)))
         .apply(
-            GroupIntoBatches.<Integer, Request>ofSize(50)
+            GroupIntoBatches.<Integer, Internal>ofSize(50)
                 .withMaxBufferingDuration(Duration.millis(20)))
         .apply(ParDo.of(new DatabaseReadFn(accessor)));
   }

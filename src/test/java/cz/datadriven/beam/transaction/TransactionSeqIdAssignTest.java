@@ -15,7 +15,7 @@
  */
 package cz.datadriven.beam.transaction;
 
-import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.transforms.Create;
@@ -27,18 +27,18 @@ import org.junit.jupiter.api.Test;
 public class TransactionSeqIdAssignTest {
 
   @Test
-  public void testAssignment() {
+  void testAssignment() {
     Pipeline p = Pipeline.create();
-    PCollection<Request> requests =
+    PCollection<Internal> requests =
         p.apply(
             Create.of(
-                Request.getDefaultInstance(),
-                Request.getDefaultInstance(),
-                Request.getDefaultInstance()));
+                Internal.getDefaultInstance(),
+                Internal.getDefaultInstance(),
+                Internal.getDefaultInstance()));
     PCollection<Long> ids =
         requests
             .apply(TransactionSeqIdAssign.of())
-            .apply(MapElements.into(TypeDescriptors.longs()).via(Request::getSeqId));
+            .apply(MapElements.into(TypeDescriptors.longs()).via(Internal::getSeqId));
     PAssert.that(ids).containsInAnyOrder(1L, 2L, 3L);
     p.run();
   }

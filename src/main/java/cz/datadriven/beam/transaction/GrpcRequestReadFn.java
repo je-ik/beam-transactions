@@ -17,6 +17,7 @@ package cz.datadriven.beam.transaction;
 
 import com.google.common.base.Preconditions;
 import com.google.protobuf.TextFormat;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import cz.datadriven.beam.transaction.proto.TransactionServerGrpc.TransactionServerImplBase;
@@ -47,7 +48,7 @@ import org.joda.time.Instant;
 
 @Slf4j
 @UnboundedPerElement
-public class GrpcRequestReadFn extends DoFn<byte[], Request> {
+public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   // FIXME: this key must be unique for *all* splits
   private static Map<String, Server> SERVERS = new ConcurrentHashMap<>();
@@ -177,7 +178,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Request> {
   @ProcessElement
   public ProcessContinuation process(
       RestrictionTracker<String, Void> tracker,
-      OutputReceiver<Request> output,
+      OutputReceiver<Internal> output,
       ManualWatermarkEstimator<Instant> estimator) {
 
     while (tracker.tryClaim(null)) {
@@ -193,7 +194,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Request> {
           if (polled != null) {
             Instant watermark = watermarkFn.apply(polled);
             Instant now = Instant.now();
-            output.outputWithTimestamp(polled, now);
+            output.outputWithTimestamp(toInternal(polled), now);
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
@@ -208,5 +209,9 @@ public class GrpcRequestReadFn extends DoFn<byte[], Request> {
       }
     }
     return ProcessContinuation.stop();
+  }
+
+  private Internal toInternal(Request request) {
+    return Internal.newBuilder().setRequest(request).build();
   }
 }
