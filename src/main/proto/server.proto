@@ -5,17 +5,15 @@ package cz.datadriven.beam.transaction.proto;
 message KeyValue {
   string key = 1;
   double value = 2;
-  // used internally
-  uint64 seqId = 3;
 }
 
 message ReadPayload {
-  // keys whose current amounts to read
+  // keys to read the current amounts of
   repeated string key = 1;
 }
 
 message WritePayload {
-  repeated KeyValue keyvalue = 1;
+  repeated KeyValue keyValue = 1;
 }
 
 message Request {
@@ -32,6 +30,7 @@ message Request {
   string requestUid = 2;
   string responseHost = 3;
   int32 responsePort = 4;
+
   // might be missing when type is BEGIN
   string transactionId = 5;
 
@@ -39,8 +38,6 @@ message Request {
   ReadPayload readPayload = 7;
   WritePayload writePayload = 8;
 
-  // internal
-  uint64 seqId = 9;
 }
 
 message Response {
@@ -57,6 +54,7 @@ message Response {
 
   // response to READ request
   repeated KeyValue keyvalue = 5;
+
 }
 
 message ServerAck {

@@ -16,6 +16,7 @@
 package cz.datadriven.beam.transaction;
 
 import com.google.common.annotations.VisibleForTesting;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import org.apache.beam.sdk.transforms.Impulse;
 import org.apache.beam.sdk.transforms.PTransform;
@@ -25,7 +26,7 @@ import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
 import org.joda.time.Instant;
 
-public class GrpcRequestRead extends PTransform<PBegin, PCollection<Request>> {;
+public class GrpcRequestRead extends PTransform<PBegin, PCollection<Internal>> {;
 
   public static GrpcRequestRead of() {
     return new GrpcRequestRead(null);
@@ -43,7 +44,7 @@ public class GrpcRequestRead extends PTransform<PBegin, PCollection<Request>> {;
   }
 
   @Override
-  public PCollection<Request> expand(PBegin input) {
+  public PCollection<Internal> expand(PBegin input) {
     return input
         .apply(Impulse.create())
         .apply(

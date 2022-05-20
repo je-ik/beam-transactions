@@ -16,7 +16,7 @@
 package cz.datadriven.beam.transaction;
 
 import com.google.common.base.MoreObjects;
-import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.beam.sdk.state.MapState;
@@ -34,13 +34,13 @@ import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 
 public class TransactionSeqIdAssign
-    extends PTransform<PCollection<Request>, PCollection<Request>> {
+    extends PTransform<PCollection<Internal>, PCollection<Internal>> {
 
   public static TransactionSeqIdAssign of() {
     return new TransactionSeqIdAssign();
   }
 
-  static class TransactionSeqIdAssignmentFn extends DoFn<KV<Void, Request>, Request> {
+  static class TransactionSeqIdAssignmentFn extends DoFn<KV<Void, Internal>, Internal> {
 
     @StateId("seqId")
     final StateSpec<ValueState<Long>> seqIdSpec = StateSpecs.value();
@@ -50,12 +50,12 @@ public class TransactionSeqIdAssign
 
     @ProcessElement
     public void process(
-        @Element KV<Void, Request> element,
+        @Element KV<Void, Internal> element,
         @StateId("seqId") final ValueState<Long> seqId,
         @StateId("seqIdMap") MapState<String, Long> seqIdMap,
-        OutputReceiver<Request> output) {
+        OutputReceiver<Internal> output) {
 
-      Request request = element.getValue();
+      Internal request = element.getValue();
       AtomicLong value = new AtomicLong();
       ReadableState<Long> transactionSeqId =
           seqIdMap.computeIfAbsent(
@@ -71,14 +71,14 @@ public class TransactionSeqIdAssign
     }
   }
 
-  public PCollection<Request> expand(PCollection<Request> input) {
+  public PCollection<Internal> expand(PCollection<Internal> input) {
     return input
         .apply(
             MapElements.into(
-                    TypeDescriptors.kvs(TypeDescriptors.voids(), TypeDescriptor.of(Request.class)))
+                    TypeDescriptors.kvs(TypeDescriptors.voids(), TypeDescriptor.of(Internal.class)))
                 .via(
                     request -> {
-                      final Request outputRequest;
+                      final Internal outputRequest;
                       if (request.getTransactionId().isEmpty()) {
                         outputRequest =
                             request.toBuilder().setTransactionId(newTransactionUid()).build();

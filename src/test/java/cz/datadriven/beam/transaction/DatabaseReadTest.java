@@ -16,11 +16,9 @@
 package cz.datadriven.beam.transaction;
 
 import com.google.common.collect.Iterables;
-import cz.datadriven.beam.transaction.proto.Server.ReadPayload;
-import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.transforms.Create;
@@ -32,12 +30,12 @@ import org.junit.jupiter.api.Test;
 public class DatabaseReadTest {
 
   @Test
-  public void testRead() {
+  void testRead() {
     DatabaseAccessor accessor = new MemoryDatabaseAccessor();
     accessor.set("1", new DatabaseAccessor.Value(1.0, 1L));
     accessor.set("2", new DatabaseAccessor.Value(2.0, 2L));
     accessor.set("3", new DatabaseAccessor.Value(3.0, 3L));
-    List<Request> inputs = Arrays.asList(newRequest("1", "3"), newRequest("2", "4"));
+    List<Internal> inputs = Arrays.asList(newRequest(1L, "1", "3"), newRequest(2L, "2", "4"));
     Pipeline pipeline = Pipeline.create();
     PCollection<String> result =
         pipeline
@@ -48,28 +46,22 @@ public class DatabaseReadTest {
                     .via(
                         e ->
                             Iterables.transform(
-                                e.getKeyvalueList(),
-                                kv ->
-                                    e.getRequestUid() + ":" + kv.getKey() + "=" + kv.getValue())));
+                                e.getKeyValueList(),
+                                kv -> e.getSeqId() + ":" + kv.getKey() + "=" + kv.getValue())));
 
-    PAssert.that(result)
-        .containsInAnyOrder(
-            inputs.get(0).getRequestUid() + ":1=1.0",
-            inputs.get(0).getRequestUid() + ":3=3.0",
-            inputs.get(1).getRequestUid() + ":2=2.0",
-            inputs.get(1).getRequestUid() + ":4=0.0");
+    PAssert.that(result).containsInAnyOrder("1:1=1.0", "1:3=3.0", "2:2=2.0", "2:4=0.0");
 
     pipeline.run();
   }
 
-  private Request newRequest(String key, String... other) {
-    ReadPayload.Builder builder = ReadPayload.newBuilder().addKey(key);
+  private Internal newRequest(long seqId, String key, String... other) {
+    Internal.Builder builder =
+        Internal.newBuilder()
+            .setSeqId(seqId)
+            .addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
     for (String k : other) {
-      builder.addKey(k);
+      builder = builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(k));
     }
-    return Request.newBuilder()
-        .setRequestUid(UUID.randomUUID().toString())
-        .setReadPayload(builder)
-        .build();
+    return builder.build();
   }
 }
