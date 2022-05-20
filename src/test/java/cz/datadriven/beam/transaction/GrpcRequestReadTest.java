@@ -34,10 +34,10 @@ import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.transforms.Combine;
 import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.transforms.SerializableFunction;
-import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.AfterWatermark;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.PCollection;
-import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,7 +64,10 @@ public class GrpcRequestReadTest {
     PCollection<Internal> requests = p.apply(GrpcRequestRead.of(watermarkFn));
     PCollection<Long> result =
         requests
-            .apply(Window.into(FixedWindows.of(Duration.standardSeconds(1))))
+            .apply(
+                Window.<Internal>into(new GlobalWindows())
+                    .triggering(AfterWatermark.pastEndOfWindow())
+                    .discardingFiredPanes())
             .apply(Combine.globally(Count.<Internal>combineFn()).withoutDefaults());
     PAssert.that(result).containsInAnyOrder((long) numRequests);
     CompletableFuture<Boolean> written =
