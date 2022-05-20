@@ -21,7 +21,7 @@ import javax.annotation.Nullable;
 
 public class MemoryDatabaseAccessor implements DatabaseAccessor {
 
-  private static Map<String, Value> DATA = new ConcurrentHashMap<>();
+  private static final Map<String, Value> DATA = new ConcurrentHashMap<>();
 
   @Override
   public void setup() {
@@ -30,7 +30,7 @@ public class MemoryDatabaseAccessor implements DatabaseAccessor {
 
   @Override
   public void close() {
-    DATA.clear();
+    // nop
   }
 
   @Override
