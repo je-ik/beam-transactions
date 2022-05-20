@@ -30,7 +30,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <autoservice.version>1.0</autoservice.version>
-    <beam.version>2.36.0</beam.version>
+    <beam.version>2.38.0</beam.version>
     <error-prone.version>2.4.0</error-prone.version>
     <grpc.version>1.41.1</grpc.version>
     <guava.version>31.0.1-jre</guava.version>
