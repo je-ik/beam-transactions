@@ -123,6 +123,7 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
 
     private void flushWrites(
         List<Internal> actions, long seqId, MapState<String, Long> lastWriteSeqId) {
+
       actions
           .stream()
           .filter(a -> a.getRequest().getType().equals(Type.WRITE))

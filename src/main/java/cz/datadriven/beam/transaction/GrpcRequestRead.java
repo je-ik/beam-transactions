@@ -18,6 +18,7 @@ package cz.datadriven.beam.transaction;
 import com.google.common.annotations.VisibleForTesting;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
+import javax.annotation.Nullable;
 import org.apache.beam.sdk.transforms.Impulse;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
@@ -33,7 +34,7 @@ public class GrpcRequestRead extends PTransform<PBegin, PCollection<Internal>> {
   }
 
   @VisibleForTesting
-  static GrpcRequestRead of(SerializableFunction<Request, Instant> watemarkFn) {
+  static GrpcRequestRead of(@Nullable SerializableFunction<Request, Instant> watemarkFn) {
     return new GrpcRequestRead(watemarkFn);
   }
 

@@ -44,7 +44,8 @@ public class DatabaseWriteTest {
   private Internal write(String key, double value, long seqId) {
     return Internal.newBuilder()
         .setRequest(Request.newBuilder().setType(Type.WRITE))
-        .addKeyValue(KeyValue.newBuilder().setKey(key).setValue(value).setSeqId(seqId))
+        .setSeqId(seqId)
+        .addKeyValue(KeyValue.newBuilder().setKey(key).setValue(value))
         .build();
   }
 }

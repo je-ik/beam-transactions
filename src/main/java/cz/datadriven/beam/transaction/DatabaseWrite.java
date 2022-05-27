@@ -73,7 +73,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
           element
               .getKeyValueList()
               .stream()
-              .map(kv -> KV.of(kv.getKey(), new Value(kv.getValue(), kv.getSeqId()))));
+              .map(kv -> KV.of(kv.getKey(), new Value(kv.getValue(), element.getSeqId()))));
     }
   }
 }

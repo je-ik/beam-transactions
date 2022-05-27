@@ -18,7 +18,10 @@ package cz.datadriven.beam.transaction;
 import com.google.common.base.Preconditions;
 import com.google.protobuf.TextFormat;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.Builder;
+import cz.datadriven.beam.transaction.proto.Server.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import cz.datadriven.beam.transaction.proto.TransactionServerGrpc.TransactionServerImplBase;
 import io.grpc.Server;
@@ -141,6 +144,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   GrpcRequestReadFn(
       TransactionRunnerOptions runnerOpts, SerializableFunction<Request, Instant> watermarkFn) {
+
     this.port = runnerOpts.getRequestPort();
     this.watermarkFn = watermarkFn == null ? tmp -> Instant.now() : watermarkFn;
   }
@@ -193,8 +197,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
           }
           if (polled != null) {
             Instant watermark = watermarkFn.apply(polled);
-            Instant now = Instant.now();
-            output.outputWithTimestamp(toInternal(polled), now);
+            output.outputWithTimestamp(toInternal(polled), Instant.now());
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
@@ -212,6 +215,18 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   }
 
   private Internal toInternal(Request request) {
-    return Internal.newBuilder().setRequest(request).build();
+    Builder builder =
+        Internal.newBuilder().setRequest(request).setTransactionId(request.getTransactionId());
+    if (request.getType().equals(Type.READ)) {
+      for (String key : request.getReadPayload().getKeyList()) {
+        builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
+      }
+    } else if (request.getType().equals(Type.WRITE)) {
+      for (KeyValue kv : request.getWritePayload().getKeyValueList()) {
+        builder.addKeyValue(
+            Internal.KeyValue.newBuilder().setKey(kv.getKey()).setValue(kv.getValue()));
+      }
+    }
+    return builder.build();
   }
 }

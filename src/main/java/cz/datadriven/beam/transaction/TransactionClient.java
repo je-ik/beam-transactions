@@ -114,14 +114,6 @@ public class TransactionClient implements Closeable {
     }
   }
 
-  public Response sendSync(Request request) throws ExecutionException, InterruptedException {
-    try {
-      return sendSync(request, 0, TimeUnit.MILLISECONDS);
-    } catch (TimeoutException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
   public Response sendSync(Request request, long timeout, TimeUnit unit)
       throws ExecutionException, InterruptedException, TimeoutException {
 

@@ -91,13 +91,14 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
                 newObserver(element.getKey(), channelWithObserver.getStub()));
         openChannels.put(element.getKey(), channelWithObserver);
       }
+      Response response = toResponse(element.getValue());
       if (log.isDebugEnabled()) {
         log.debug(
             "Returning response {} to observer {}",
-            TextFormat.shortDebugString(element.getValue()),
+            TextFormat.shortDebugString(response),
             channelWithObserver.getObserver());
       }
-      channelWithObserver.getObserver().onNext(toResponse(element.getValue()));
+      channelWithObserver.getObserver().onNext(response);
     }
 
     private Response toResponse(Internal value) {
