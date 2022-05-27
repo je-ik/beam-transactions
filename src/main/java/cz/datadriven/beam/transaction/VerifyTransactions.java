@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2022-2022
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -43,6 +43,10 @@ import org.apache.beam.sdk.values.TypeDescriptors;
 import org.joda.time.Instant;
 
 public class VerifyTransactions extends PTransform<PCollection<Internal>, PCollection<Internal>> {
+
+  public static VerifyTransactions of() {
+    return new VerifyTransactions();
+  }
 
   @VisibleForTesting
   static class GatherTransactionRequestsFn extends DoFn<KV<String, Internal>, List<Internal>> {
