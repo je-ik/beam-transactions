@@ -195,13 +195,13 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
                 "Polled from queue {}",
                 polled != null ? TextFormat.shortDebugString(polled) : null);
           }
+          Instant watermark = watermarkFn.apply(polled);
+          estimator.setWatermark(watermark);
           if (polled != null) {
-            Instant watermark = watermarkFn.apply(polled);
             output.outputWithTimestamp(toInternal(polled), Instant.now());
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
-            estimator.setWatermark(watermark);
           } else {
             return ProcessContinuation.resume();
           }

@@ -18,6 +18,7 @@ package cz.datadriven.beam.transaction;
 import static org.junit.jupiter.api.Assertions.*;
 
 import cz.datadriven.beam.transaction.DatabaseAccessor.Value;
+import cz.datadriven.beam.transaction.TestUtils.AfterNCommits;
 import cz.datadriven.beam.transaction.proto.Server.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.ReadPayload;
 import cz.datadriven.beam.transaction.proto.Server.Request;
@@ -42,6 +43,7 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.PipelineResult.State;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,7 +73,7 @@ public class TransactionRunnerTest {
     runner.createRunnablePipeline(
         p,
         r -> {
-          if (r.getType().equals(Type.COMMIT)) {
+          if (r != null && r.getType().equals(Type.COMMIT)) {
             return BoundedWindow.TIMESTAMP_MAX_VALUE;
           }
           return Instant.now();
@@ -128,6 +130,90 @@ public class TransactionRunnerTest {
     assertEquals(State.DONE, result.get().getState());
     assertEquals(50.0, accessor.get("alice").getAmount(), 0.0001);
     assertEquals(100.0, accessor.get("bob").getAmount(), 0.0001);
+  }
+
+  @Test
+  @Timeout(20)
+  void testTransactionsEndToEndWithCommitRejected()
+      throws ExecutionException, InterruptedException, TimeoutException {
+
+    Pipeline p = Pipeline.create(PipelineOptionsFactory.fromArgs("--requestPort=" + port).create());
+    MemoryDatabaseAccessor accessor = new MemoryDatabaseAccessor();
+    accessor.set("alice", Value.builder().amount(100.0).seqId(0L).build());
+    accessor.set("bob", Value.builder().amount(50.0).seqId(0L).build());
+    TransactionRunner runner = new TransactionRunner();
+    runner.createRunnablePipeline(p, afterCommits(2));
+    BlockingQueue<Optional<Throwable>> err = new ArrayBlockingQueue<>(1);
+    Future<PipelineResult> result =
+        executor.submit(
+            () -> {
+              try {
+                PipelineResult res = p.run();
+                err.put(Optional.empty());
+                return res;
+              } catch (Exception ex) {
+                err.put(Optional.of(ex));
+              }
+              return null;
+            });
+    // wait till server runs
+    waitTillPortReady(port);
+    TransactionClient client = TransactionClient.of("localhost", port);
+    Response response =
+        client.sendSync(
+            Request.newBuilder()
+                .setType(Type.READ)
+                .setReadPayload(ReadPayload.newBuilder().addKey("alice").addKey("bob"))
+                .build(),
+            5,
+            TimeUnit.SECONDS);
+    String transactionId1 = response.getTransactionId();
+    response =
+        client.sendSync(
+            Request.newBuilder()
+                .setType(Type.WRITE)
+                .setWritePayload(
+                    WritePayload.newBuilder()
+                        .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(75.0))
+                        .addKeyValue(KeyValue.newBuilder().setKey("bob").setValue(75.0)))
+                .build(),
+            5,
+            TimeUnit.SECONDS);
+    String transactionId2 = response.getTransactionId();
+    assertFalse(transactionId2.isEmpty());
+    response =
+        client.sendSync(
+            Request.newBuilder().setType(Type.COMMIT).setTransactionId(transactionId2).build(),
+            5,
+            TimeUnit.SECONDS);
+    assertEquals(200, response.getStatus());
+    response =
+        client.sendSync(
+            Request.newBuilder()
+                .setType(Type.WRITE)
+                .setTransactionId(transactionId1)
+                .setWritePayload(
+                    WritePayload.newBuilder()
+                        .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(50.0))
+                        .addKeyValue(KeyValue.newBuilder().setKey("bob").setValue(100.0)))
+                .build(),
+            5,
+            TimeUnit.SECONDS);
+    assertNotNull(response);
+    response =
+        client.sendSync(
+            Request.newBuilder().setType(Type.COMMIT).setTransactionId(transactionId1).build(),
+            5,
+            TimeUnit.SECONDS);
+    assertEquals(412, response.getStatus());
+    assertTrue(err.take().isEmpty());
+    assertEquals(State.DONE, result.get().getState());
+    assertEquals(75.0, accessor.get("alice").getAmount(), 0.0001);
+    assertEquals(75.0, accessor.get("bob").getAmount(), 0.0001);
+  }
+
+  private static SerializableFunction<Request, Instant> afterCommits(int n) {
+    return new AfterNCommits(n);
   }
 
   private void waitTillPortReady(int port) throws InterruptedException {
