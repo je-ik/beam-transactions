@@ -61,7 +61,7 @@ public class TransactionSeqIdAssign
           seqIdMap.computeIfAbsent(
               request.getTransactionId(),
               tmp -> {
-                long nextSeqId = MoreObjects.firstNonNull(seqId.read(), 1L);
+                long nextSeqId = MoreObjects.firstNonNull(seqId.read(), 1000L);
                 seqId.write(nextSeqId + 1);
                 value.set(nextSeqId);
                 return nextSeqId;

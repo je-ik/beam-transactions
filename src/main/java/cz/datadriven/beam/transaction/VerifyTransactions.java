@@ -23,6 +23,7 @@ import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.state.BagState;
 import org.apache.beam.sdk.state.MapState;
@@ -102,10 +103,10 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
         @StateId("seqId") MapState<String, Long> lastWriteSeqId,
         OutputReceiver<Internal> output) {
 
-      List<Internal> actions = element.getValue();
+      List<Internal> actions = Objects.requireNonNull(element.getValue());
       Internal commit = getCommitIfPresent(actions);
       if (commit != null) {
-        if (verifyNoConflict(actions, lastWriteSeqId)) {
+        if (verifyNoConflict(actions, commit.getSeqId(), lastWriteSeqId)) {
           flushWrites(actions, commit.getSeqId(), lastWriteSeqId);
           actions
               .stream()
@@ -129,35 +130,39 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
           .filter(a -> a.getRequest().getType().equals(Type.WRITE))
           .flatMap(a -> a.getKeyValueList().stream())
           .distinct()
-          .forEach(
-              kv -> {
-                if (MoreObjects.firstNonNull(lastWriteSeqId.get(kv.getKey()).read(), 0L) < seqId) {
-                  lastWriteSeqId.put(kv.getKey(), seqId);
-                }
-              });
+          .forEach(kv -> lastWriteSeqId.put(kv.getKey(), seqId));
     }
 
     private boolean verifyNoConflict(
-        List<Internal> actions, MapState<String, Long> lastWriteSeqId) {
+        List<Internal> actions, long commitSeqId, MapState<String, Long> lastWriteSeqId) {
+
       // caching
       actions
           .stream()
           .flatMap(a -> a.getKeyValueList().stream().map(KeyValue::getKey))
           .distinct()
           .forEach(k -> lastWriteSeqId.get(k).readLater());
-      return actions
-          .stream()
-          .filter(a -> a.getRequest().getType().equals(Type.READ))
-          .allMatch(a -> isValidRead(a, lastWriteSeqId));
+      return actions.stream().allMatch(a -> isValidRead(a, commitSeqId, lastWriteSeqId));
     }
 
-    private boolean isValidRead(Internal read, MapState<String, Long> lastWriteSeqId) {
-      return read.getKeyValueList()
+    private boolean isValidRead(
+        Internal action, long actionSeqId, MapState<String, Long> lastWriteSeqId) {
+
+      return action
+          .getKeyValueList()
           .stream()
-          .allMatch(
-              kv ->
-                  kv.getSeqId()
-                      >= MoreObjects.firstNonNull(lastWriteSeqId.get(kv.getKey()).read(), 0L));
+          .allMatch(kv -> isValidKvAccess(actionSeqId, lastWriteSeqId, kv));
+    }
+
+    private boolean isValidKvAccess(
+        long actionSeqId, MapState<String, Long> lastWriteSeqId, KeyValue kv) {
+
+      boolean isRead = kv.getSeqId() != 0;
+      long lastWrite = MoreObjects.firstNonNull(lastWriteSeqId.get(kv.getKey()).read(), -1L);
+      if (isRead) {
+        return kv.getSeqId() == lastWrite || lastWrite == -1L;
+      }
+      return actionSeqId > lastWrite;
     }
 
     @Nullable

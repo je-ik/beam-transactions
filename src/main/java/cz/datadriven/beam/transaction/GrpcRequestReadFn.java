@@ -15,7 +15,6 @@
  */
 package cz.datadriven.beam.transaction;
 
-import com.google.common.base.Preconditions;
 import com.google.protobuf.TextFormat;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.Builder;
@@ -28,11 +27,10 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
-import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 import lombok.Getter;
@@ -53,27 +51,25 @@ import org.joda.time.Instant;
 @UnboundedPerElement
 public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
-  // FIXME: this key must be unique for *all* splits
-  private static Map<String, Server> SERVERS = new ConcurrentHashMap<>();
-  private static Map<String, BlockingQueue<Request>> RUNNING_SERVERS = new ConcurrentHashMap<>();
+  private static volatile Server SERVER = null;
+  private static final BlockingQueue<Request> OUTPUT_QUEUE = new ArrayBlockingQueue<>(1000);
 
   static class RequestService extends TransactionServerImplBase {
 
-    private final String restriction;
-
-    RequestService(String restriction) {
-      this.restriction = restriction;
-    }
-
     @Override
     public StreamObserver<Request> stream(StreamObserver<ServerAck> responseObserver) {
-      BlockingQueue<Request> output = RUNNING_SERVERS.get(restriction);
-      Preconditions.checkArgument(output != null);
+      BlockingQueue<Request> output = OUTPUT_QUEUE;
       return new StreamObserver<>() {
         @Override
         public void onNext(Request request) {
           log.debug("Received request {}", request.getUid());
-          output.add(request);
+          try {
+            output.put(request);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            responseObserver.onError(e);
+          }
+          // FIXME: this must be in bundle finalizer
           responseObserver.onNext(
               ServerAck.newBuilder().setUid(request.getUid()).setStatus(200).build());
         }
@@ -92,28 +88,28 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   public class GrpcTracker extends RestrictionTracker<String, Void> {
 
     private final String restriction;
-    private final Server server;
 
     boolean finished = false;
 
     public GrpcTracker(String restriction) {
-      this.restriction = restriction;
-      this.server = SERVERS.computeIfAbsent(restriction, tmp -> newServer());
+      this.restriction = Objects.requireNonNull(restriction);
     }
 
     private Server newServer() {
-      return ServerBuilder.forPort(getPort()).addService(new RequestService(restriction)).build();
+      return ServerBuilder.forPort(getPort()).addService(new RequestService()).build();
     }
 
     @Override
     public boolean tryClaim(Void position) {
-      if (!RUNNING_SERVERS.containsKey(restriction)) {
-        RUNNING_SERVERS.put(restriction, new ArrayBlockingQueue<>(100));
-        try {
+      if (SERVER == null) {
+        synchronized (GrpcRequestReadFn.class) {
+          SERVER = newServer();
           log.info("Running new server.");
-          server.start();
-        } catch (IOException e) {
-          throw new RuntimeException(e);
+          try {
+            SERVER.start();
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
         }
       }
       return !finished;
@@ -135,7 +131,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
     @Override
     public IsBounded isBounded() {
-      return null;
+      return IsBounded.UNBOUNDED;
     }
   }
 
@@ -176,7 +172,14 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   @Teardown
   public void tearDown() {
-    SERVERS.values().forEach(Server::shutdown);
+    if (SERVER != null) {
+      synchronized (GrpcRequestReadFn.class) {
+        if (SERVER != null) {
+          SERVER.shutdown();
+          SERVER = null;
+        }
+      }
+    }
   }
 
   @ProcessElement
@@ -186,10 +189,11 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       ManualWatermarkEstimator<Instant> estimator) {
 
     while (tracker.tryClaim(null)) {
-      BlockingQueue<Request> requests = RUNNING_SERVERS.get(tracker.currentRestriction());
-      if (requests != null) {
-        try {
-          @Nullable Request polled = requests.poll(10, TimeUnit.MILLISECONDS);
+      BlockingQueue<Request> requests = OUTPUT_QUEUE;
+      try {
+        @Nullable Request polled;
+        do {
+          polled = requests.poll(10, TimeUnit.MILLISECONDS);
           if (log.isDebugEnabled()) {
             log.debug(
                 "Polled from queue {}",
@@ -202,13 +206,14 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
-          } else {
-            return ProcessContinuation.resume();
+          } else if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
+            return ProcessContinuation.stop();
           }
-        } catch (InterruptedException e) {
-          log.info("Interrupted while processing requests.", e);
-          return ProcessContinuation.stop();
-        }
+        } while (polled != null);
+        return ProcessContinuation.resume();
+      } catch (InterruptedException e) {
+        log.info("Interrupted while processing requests.", e);
+        return ProcessContinuation.stop();
       }
     }
     return ProcessContinuation.stop();

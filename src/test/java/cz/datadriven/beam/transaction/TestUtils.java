@@ -17,6 +17,7 @@ package cz.datadriven.beam.transaction;
 
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,6 +47,19 @@ public class TestUtils {
       }
       Instant now = Instant.now();
       return now;
+    }
+  }
+
+  static class StaticBoolean implements Serializable {
+
+    private static volatile boolean VALUE;
+
+    boolean get() {
+      return VALUE;
+    }
+
+    void set() {
+      VALUE = true;
     }
   }
 

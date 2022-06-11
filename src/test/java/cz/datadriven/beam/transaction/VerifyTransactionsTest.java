@@ -100,7 +100,7 @@ public class VerifyTransactionsTest {
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(1L).build()));
+                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
     Internal write =
         asInternal(
             "t1",
@@ -112,7 +112,7 @@ public class VerifyTransactionsTest {
                         .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(1.0)))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).setSeqId(2L).build()));
+                Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
     Internal commit = asInternal("t1", 2L, Request.newBuilder().setType(Type.COMMIT).build());
     Instant now = new Instant(0);
     TestStream<Internal> input =
@@ -149,7 +149,7 @@ public class VerifyTransactionsTest {
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(1L).build()));
+                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
     Internal read2 =
         asInternal(
             "t2",
@@ -159,7 +159,7 @@ public class VerifyTransactionsTest {
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(1L).build()));
+                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
     Internal write =
         asInternal(
             "t1",
@@ -171,7 +171,7 @@ public class VerifyTransactionsTest {
                         .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(1.0)))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).setSeqId(2L).build()));
+                Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
     Internal commit = asInternal("t1", 2L, Request.newBuilder().setType(Type.COMMIT).build());
     Internal commit2 = asInternal("t2", 3L, Request.newBuilder().setType(Type.COMMIT).build());
     Instant now = new Instant(0);

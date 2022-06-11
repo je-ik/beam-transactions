@@ -70,6 +70,10 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     @RequiresStableInput
     @ProcessElement
     public void process(@Element KV<String, Internal> element) {
+      if (element.getValue().getRequest().getRequestUid().isEmpty()) {
+        // skip requests that so not wait for response
+        return;
+      }
       ChannelWithObserver channelWithObserver =
           openChannels.computeIfAbsent(
               element.getKey(),

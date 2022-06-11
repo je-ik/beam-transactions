@@ -15,17 +15,26 @@
  */
 package cz.datadriven.beam.transaction;
 
+import com.google.common.base.MoreObjects;
 import cz.datadriven.beam.transaction.DatabaseAccessor.Value;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import org.apache.beam.sdk.state.StateSpec;
+import org.apache.beam.sdk.state.StateSpecs;
+import org.apache.beam.sdk.state.ValueState;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.Filter;
+import org.apache.beam.sdk.transforms.FlatMapElements;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.Reshuffle;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
+import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.TypeDescriptors;
 
 public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
@@ -43,14 +52,29 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
   public PDone expand(PCollection<Internal> input) {
     input
         .apply(Filter.by(a -> a.getRequest().getType().equals(Type.WRITE)))
-        .apply(Reshuffle.viaRandomKey())
+        .apply(
+            FlatMapElements.into(
+                    TypeDescriptors.kvs(
+                        TypeDescriptors.strings(), TypeDescriptor.of(KeyValue.class)))
+                .via(
+                    a ->
+                        a.getKeyValueList()
+                            .stream()
+                            .map(
+                                kv ->
+                                    KV.of(
+                                        kv.getKey(), kv.toBuilder().setSeqId(a.getSeqId()).build()))
+                            .collect(Collectors.toList())))
         .apply(ParDo.of(new WriteFn(accessor)));
     return PDone.in(input.getPipeline());
   }
 
-  private static class WriteFn extends DoFn<Internal, Void> {
+  private static class WriteFn extends DoFn<KV<String, KeyValue>, Void> {
 
     private final DatabaseAccessor accessor;
+
+    @StateId("lastWritten")
+    private final StateSpec<ValueState<Long>> lastWrittenSpec = StateSpecs.value();
 
     public WriteFn(DatabaseAccessor accessor) {
       this.accessor = accessor;
@@ -68,12 +92,16 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
     @RequiresStableInput
     @ProcessElement
-    public void process(@Element Internal element) {
-      accessor.setBatch(
-          element
-              .getKeyValueList()
-              .stream()
-              .map(kv -> KV.of(kv.getKey(), new Value(kv.getValue(), element.getSeqId()))));
+    public void process(
+        @Element KV<String, KeyValue> element,
+        @StateId("lastWritten") ValueState<Long> lastWritten) {
+
+      long written = MoreObjects.firstNonNull(lastWritten.read(), 0L);
+      KeyValue value = Objects.requireNonNull(element.getValue());
+      if (written < value.getSeqId()) {
+        accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId()));
+        lastWritten.write(value.getSeqId());
+      }
     }
   }
 }

@@ -39,7 +39,7 @@ public class TransactionSeqIdAssignTest {
         requests
             .apply(TransactionSeqIdAssign.of())
             .apply(MapElements.into(TypeDescriptors.longs()).via(Internal::getSeqId));
-    PAssert.that(ids).containsInAnyOrder(1L, 2L, 3L);
+    PAssert.that(ids).containsInAnyOrder(1000L, 1001L, 1002L);
     p.run();
   }
 }

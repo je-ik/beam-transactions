@@ -123,7 +123,8 @@ public class TransactionRunner {
         .apply("writeResponses", GrpcResponseWrite.of());
   }
 
-  private DatabaseAccessor createAccessor(PipelineOptions opts) {
+  @VisibleForTesting
+  DatabaseAccessor createAccessor(PipelineOptions opts) {
     // FIXME
     return new MemoryDatabaseAccessor();
   }

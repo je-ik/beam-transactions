@@ -152,8 +152,10 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>${maven-surefire-plugin.version}</version>
         <configuration>
-          <parallel>all</parallel>
+          <parallel>classes</parallel>
           <threadCount>1</threadCount>
+          <forkCount>1</forkCount>
+          <reuseForks>false</reuseForks>
         </configuration>
       </plugin>
 
@@ -273,12 +275,12 @@
       <scope>test</scope>
     </dependency>
 
-    <!--dependency>
+    <dependency>
       <groupId>org.apache.beam</groupId>
-      <artifactId>beam-runners-flink-1.13</artifactId>
+      <artifactId>beam-runners-flink-1.14</artifactId>
       <version>${beam.version}</version>
       <scope>test</scope>
-    </dependency-->
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>
