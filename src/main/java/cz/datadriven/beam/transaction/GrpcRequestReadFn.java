@@ -27,6 +27,8 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -45,6 +47,8 @@ import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.SplitResult;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimators.Manual;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
+import org.apache.beam.sdk.values.KV;
+import org.joda.time.Duration;
 import org.joda.time.Instant;
 
 @Slf4j
@@ -52,26 +56,23 @@ import org.joda.time.Instant;
 public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   private static volatile Server SERVER = null;
-  private static final BlockingQueue<Request> OUTPUT_QUEUE = new ArrayBlockingQueue<>(1000);
+  private static final BlockingQueue<KV<Request, StreamObserver<ServerAck>>> OUTPUT_QUEUE =
+      new ArrayBlockingQueue<>(1000);
 
   static class RequestService extends TransactionServerImplBase {
 
     @Override
     public StreamObserver<Request> stream(StreamObserver<ServerAck> responseObserver) {
-      BlockingQueue<Request> output = OUTPUT_QUEUE;
       return new StreamObserver<>() {
         @Override
         public void onNext(Request request) {
           log.debug("Received request {}", request.getUid());
           try {
-            output.put(request);
+            OUTPUT_QUEUE.put(KV.of(request, responseObserver));
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             responseObserver.onError(e);
           }
-          // FIXME: this must be in bundle finalizer
-          responseObserver.onNext(
-              ServerAck.newBuilder().setUid(request.getUid()).setStatus(200).build());
         }
 
         @Override
@@ -137,6 +138,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   @Getter private final int port;
   private final SerializableFunction<Request, Instant> watermarkFn;
+  private final List<KV<Request, StreamObserver<ServerAck>>> claimedRequests = new ArrayList<>();
 
   GrpcRequestReadFn(
       TransactionRunnerOptions runnerOpts, SerializableFunction<Request, Instant> watermarkFn) {
@@ -186,23 +188,27 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   public ProcessContinuation process(
       RestrictionTracker<String, Void> tracker,
       OutputReceiver<Internal> output,
-      ManualWatermarkEstimator<Instant> estimator) {
+      ManualWatermarkEstimator<Instant> estimator,
+      BundleFinalizer bundleFinalizer) {
 
-    while (tracker.tryClaim(null)) {
-      BlockingQueue<Request> requests = OUTPUT_QUEUE;
+    bundleFinalizer.afterBundleCommit(
+        Instant.now().plus(Duration.standardSeconds(10)), this::confirmGrpcRequests);
+
+    if (tracker.tryClaim(null)) {
       try {
-        @Nullable Request polled;
+        @Nullable KV<Request, StreamObserver<ServerAck>> polled;
         do {
-          polled = requests.poll(10, TimeUnit.MILLISECONDS);
+          polled = OUTPUT_QUEUE.poll(10, TimeUnit.MILLISECONDS);
           if (log.isDebugEnabled()) {
             log.debug(
                 "Polled from queue {}",
-                polled != null ? TextFormat.shortDebugString(polled) : null);
+                polled != null ? TextFormat.shortDebugString(polled.getKey()) : null);
           }
-          Instant watermark = watermarkFn.apply(polled);
+          Instant watermark = watermarkFn.apply(polled != null ? polled.getKey() : null);
           estimator.setWatermark(watermark);
           if (polled != null) {
-            output.outputWithTimestamp(toInternal(polled), Instant.now());
+            claimedRequests.add(polled);
+            output.outputWithTimestamp(toInternal(polled.getKey()), Instant.now());
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
@@ -217,6 +223,15 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       }
     }
     return ProcessContinuation.stop();
+  }
+
+  private void confirmGrpcRequests() {
+    claimedRequests.forEach(
+        kv ->
+            kv.getValue()
+                .onNext(
+                    ServerAck.newBuilder().setUid(kv.getKey().getUid()).setStatus(200).build()));
+    claimedRequests.clear();
   }
 
   private Internal toInternal(Request request) {
