@@ -15,21 +15,24 @@
  */
 package cz.datadriven.beam.transaction;
 
-import com.google.common.base.Preconditions;
 import com.google.protobuf.TextFormat;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
+import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.Builder;
+import cz.datadriven.beam.transaction.proto.Server.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import cz.datadriven.beam.transaction.proto.TransactionServerGrpc.TransactionServerImplBase;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 import lombok.Getter;
@@ -44,35 +47,32 @@ import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.SplitResult;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimators.Manual;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
+import org.apache.beam.sdk.values.KV;
+import org.joda.time.Duration;
 import org.joda.time.Instant;
 
 @Slf4j
 @UnboundedPerElement
 public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
-  // FIXME: this key must be unique for *all* splits
-  private static Map<String, Server> SERVERS = new ConcurrentHashMap<>();
-  private static Map<String, BlockingQueue<Request>> RUNNING_SERVERS = new ConcurrentHashMap<>();
+  private static volatile Server SERVER = null;
+  private static final BlockingQueue<KV<Request, StreamObserver<ServerAck>>> OUTPUT_QUEUE =
+      new ArrayBlockingQueue<>(1000);
 
   static class RequestService extends TransactionServerImplBase {
 
-    private final String restriction;
-
-    RequestService(String restriction) {
-      this.restriction = restriction;
-    }
-
     @Override
     public StreamObserver<Request> stream(StreamObserver<ServerAck> responseObserver) {
-      BlockingQueue<Request> output = RUNNING_SERVERS.get(restriction);
-      Preconditions.checkArgument(output != null);
       return new StreamObserver<>() {
         @Override
         public void onNext(Request request) {
           log.debug("Received request {}", request.getUid());
-          output.add(request);
-          responseObserver.onNext(
-              ServerAck.newBuilder().setUid(request.getUid()).setStatus(200).build());
+          try {
+            OUTPUT_QUEUE.put(KV.of(request, responseObserver));
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            responseObserver.onError(e);
+          }
         }
 
         @Override
@@ -89,28 +89,28 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   public class GrpcTracker extends RestrictionTracker<String, Void> {
 
     private final String restriction;
-    private final Server server;
 
     boolean finished = false;
 
     public GrpcTracker(String restriction) {
-      this.restriction = restriction;
-      this.server = SERVERS.computeIfAbsent(restriction, tmp -> newServer());
+      this.restriction = Objects.requireNonNull(restriction);
     }
 
     private Server newServer() {
-      return ServerBuilder.forPort(getPort()).addService(new RequestService(restriction)).build();
+      return ServerBuilder.forPort(getPort()).addService(new RequestService()).build();
     }
 
     @Override
     public boolean tryClaim(Void position) {
-      if (!RUNNING_SERVERS.containsKey(restriction)) {
-        RUNNING_SERVERS.put(restriction, new ArrayBlockingQueue<>(100));
-        try {
+      if (SERVER == null) {
+        synchronized (GrpcRequestReadFn.class) {
+          SERVER = newServer();
           log.info("Running new server.");
-          server.start();
-        } catch (IOException e) {
-          throw new RuntimeException(e);
+          try {
+            SERVER.start();
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
         }
       }
       return !finished;
@@ -132,15 +132,17 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
     @Override
     public IsBounded isBounded() {
-      return null;
+      return IsBounded.UNBOUNDED;
     }
   }
 
   @Getter private final int port;
   private final SerializableFunction<Request, Instant> watermarkFn;
+  private final List<KV<Request, StreamObserver<ServerAck>>> claimedRequests = new ArrayList<>();
 
   GrpcRequestReadFn(
       TransactionRunnerOptions runnerOpts, SerializableFunction<Request, Instant> watermarkFn) {
+
     this.port = runnerOpts.getRequestPort();
     this.watermarkFn = watermarkFn == null ? tmp -> Instant.now() : watermarkFn;
   }
@@ -172,46 +174,79 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
 
   @Teardown
   public void tearDown() {
-    SERVERS.values().forEach(Server::shutdown);
+    if (SERVER != null) {
+      synchronized (GrpcRequestReadFn.class) {
+        if (SERVER != null) {
+          SERVER.shutdown();
+          SERVER = null;
+        }
+      }
+    }
   }
 
   @ProcessElement
   public ProcessContinuation process(
       RestrictionTracker<String, Void> tracker,
       OutputReceiver<Internal> output,
-      ManualWatermarkEstimator<Instant> estimator) {
+      ManualWatermarkEstimator<Instant> estimator,
+      BundleFinalizer bundleFinalizer) {
 
-    while (tracker.tryClaim(null)) {
-      BlockingQueue<Request> requests = RUNNING_SERVERS.get(tracker.currentRestriction());
-      if (requests != null) {
-        try {
-          @Nullable Request polled = requests.poll(10, TimeUnit.MILLISECONDS);
+    bundleFinalizer.afterBundleCommit(
+        Instant.now().plus(Duration.standardSeconds(10)), this::confirmGrpcRequests);
+
+    if (tracker.tryClaim(null)) {
+      try {
+        @Nullable KV<Request, StreamObserver<ServerAck>> polled;
+        do {
+          polled = OUTPUT_QUEUE.poll(10, TimeUnit.MILLISECONDS);
           if (log.isDebugEnabled()) {
             log.debug(
                 "Polled from queue {}",
-                polled != null ? TextFormat.shortDebugString(polled) : null);
+                polled != null ? TextFormat.shortDebugString(polled.getKey()) : null);
           }
+          Instant watermark = watermarkFn.apply(polled != null ? polled.getKey() : null);
+          estimator.setWatermark(watermark);
           if (polled != null) {
-            Instant watermark = watermarkFn.apply(polled);
-            Instant now = Instant.now();
-            output.outputWithTimestamp(toInternal(polled), now);
+            claimedRequests.add(polled);
+            output.outputWithTimestamp(toInternal(polled.getKey()), Instant.now());
             if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
               break;
             }
-            estimator.setWatermark(watermark);
-          } else {
-            return ProcessContinuation.resume();
+          } else if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
+            return ProcessContinuation.stop();
           }
-        } catch (InterruptedException e) {
-          log.info("Interrupted while processing requests.", e);
-          return ProcessContinuation.stop();
-        }
+        } while (polled != null);
+        return ProcessContinuation.resume();
+      } catch (InterruptedException e) {
+        log.info("Interrupted while processing requests.", e);
+        return ProcessContinuation.stop();
       }
     }
     return ProcessContinuation.stop();
   }
 
+  private void confirmGrpcRequests() {
+    claimedRequests.forEach(
+        kv ->
+            kv.getValue()
+                .onNext(
+                    ServerAck.newBuilder().setUid(kv.getKey().getUid()).setStatus(200).build()));
+    claimedRequests.clear();
+  }
+
   private Internal toInternal(Request request) {
-    return Internal.newBuilder().setRequest(request).build();
+    Builder builder =
+        Internal.newBuilder().setRequest(request).setTransactionId(request.getTransactionId());
+    if (request.getType().equals(Type.READ)) {
+      for (String key : request.getReadPayload().getKeyList()) {
+        builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
+      }
+    } else if (request.getType().equals(Type.WRITE)) {
+      for (KeyValue kv : request.getWritePayload().getKeyValueList()) {
+        builder.addKeyValue(
+            Internal.KeyValue.newBuilder().setKey(kv.getKey()).setValue(kv.getValue()));
+      }
+    }
+    return builder.build();
   }
 }

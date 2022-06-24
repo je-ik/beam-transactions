@@ -9,11 +9,11 @@ message Internal {
   message KeyValue {
     string key = 1;
     double value = 2;
-    uint64 seqId = 3;
+    int64 seqId = 3;
   }
 
   string transactionId = 1;
-  uint64 seqId = 2;
+  int64 seqId = 2;
   repeated KeyValue keyValue = 3;
   Request request = 4;
   

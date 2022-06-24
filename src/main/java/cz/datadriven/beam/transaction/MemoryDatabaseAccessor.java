@@ -16,12 +16,20 @@
 package cz.datadriven.beam.transaction;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions;
 
 public class MemoryDatabaseAccessor implements DatabaseAccessor {
 
-  private static final Map<String, Value> DATA = new ConcurrentHashMap<>();
+  private static final Map<String, Map<String, Value>> DATA = new ConcurrentHashMap<>();
+
+  private final String uuid = UUID.randomUUID().toString();
+
+  public MemoryDatabaseAccessor() {
+    DATA.put(uuid, new ConcurrentHashMap<>());
+  }
 
   @Override
   public void setup() {
@@ -35,19 +43,19 @@ public class MemoryDatabaseAccessor implements DatabaseAccessor {
 
   @Override
   public void set(String key, Value value) {
-    DATA.compute(
-        key,
-        (k, v) -> {
-          if (v == null || v.getSeqId() < value.getSeqId()) {
-            return value;
-          }
-          return v;
-        });
+    Preconditions.checkState(value.getSeqId() > 0L);
+    DATA.get(uuid)
+        .compute(
+            key,
+            (k, v) -> {
+              Preconditions.checkState(v == null || v.getSeqId() < value.getSeqId());
+              return value;
+            });
   }
 
   @Nullable
   @Override
   public Value get(String key) {
-    return DATA.get(key);
+    return DATA.get(uuid).get(key);
   }
 }

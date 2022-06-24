@@ -48,11 +48,19 @@ import lombok.extern.slf4j.Slf4j;
 public class TransactionClient implements Closeable {
 
   public static TransactionClient of(String host, int port) {
-    try {
-      return new TransactionClient(host, port);
-    } catch (Exception ex) {
-      throw new RuntimeException(ex);
+    Exception caught = null;
+    for (int i = 0; i < 3; i++) {
+      try {
+        return new TransactionClient(host, port);
+      } catch (IOException ex) {
+        if (caught == null) {
+          caught = ex;
+        } else {
+          caught.addSuppressed(ex);
+        }
+      }
     }
+    throw new RuntimeException(caught);
   }
 
   class TransactionClientService extends TransactionClientImplBase {
@@ -111,14 +119,6 @@ public class TransactionClient implements Closeable {
     }
     if (!server.isShutdown()) {
       server.shutdown();
-    }
-  }
-
-  public Response sendSync(Request request) throws ExecutionException, InterruptedException {
-    try {
-      return sendSync(request, 0, TimeUnit.MILLISECONDS);
-    } catch (TimeoutException e) {
-      throw new RuntimeException(e);
     }
   }
 

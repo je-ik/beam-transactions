@@ -19,10 +19,12 @@ import java.io.Closeable;
 import java.io.Serializable;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
+import lombok.Builder;
 import org.apache.beam.sdk.values.KV;
 
 public interface DatabaseAccessor extends Serializable, Closeable {
 
+  @Builder
   @lombok.Value
   class Value {
     double amount;

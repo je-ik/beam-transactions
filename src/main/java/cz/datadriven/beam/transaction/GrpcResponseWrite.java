@@ -70,6 +70,10 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     @RequiresStableInput
     @ProcessElement
     public void process(@Element KV<String, Internal> element) {
+      if (element.getValue().getRequest().getRequestUid().isEmpty()) {
+        // skip requests that so not wait for response
+        return;
+      }
       ChannelWithObserver channelWithObserver =
           openChannels.computeIfAbsent(
               element.getKey(),
@@ -91,13 +95,14 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
                 newObserver(element.getKey(), channelWithObserver.getStub()));
         openChannels.put(element.getKey(), channelWithObserver);
       }
+      Response response = toResponse(element.getValue());
       if (log.isDebugEnabled()) {
         log.debug(
             "Returning response {} to observer {}",
-            TextFormat.shortDebugString(element.getValue()),
+            TextFormat.shortDebugString(response),
             channelWithObserver.getObserver());
       }
-      channelWithObserver.getObserver().onNext(toResponse(element.getValue()));
+      channelWithObserver.getObserver().onNext(response);
     }
 
     private Response toResponse(Internal value) {

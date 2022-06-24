@@ -16,8 +16,11 @@
 package cz.datadriven.beam.transaction;
 
 import cz.datadriven.beam.transaction.proto.Server.Request;
+import cz.datadriven.beam.transaction.proto.Server.Request.Type;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
@@ -26,15 +29,51 @@ public class TestUtils {
 
   private static final Map<String, Integer> TEST_CONTEXTS = new ConcurrentHashMap<>();
 
+  static class AfterNCommits implements SerializableFunction<Request, Instant> {
+    private static final AtomicInteger numCommits = new AtomicInteger();
+    private final int n;
+
+    AfterNCommits(int n) {
+      this.n = n;
+    }
+
+    @Override
+    public Instant apply(Request request) {
+      if (request != null
+          && request.getType().equals(Type.COMMIT)
+          && numCommits.incrementAndGet() >= n) {
+
+        return BoundedWindow.TIMESTAMP_MAX_VALUE;
+      }
+      Instant now = Instant.now();
+      return now;
+    }
+  }
+
+  static class StaticBoolean implements Serializable {
+
+    private static volatile boolean VALUE;
+
+    boolean get() {
+      return VALUE;
+    }
+
+    void set() {
+      VALUE = true;
+    }
+  }
+
   static void startTest(String testUid) {
     TEST_CONTEXTS.put(testUid, 0);
   }
 
   static SerializableFunction<Request, Instant> getMaxRequestsFn(String testUuid, int numRequests) {
     return req -> {
-      int current = TEST_CONTEXTS.compute(testUuid, (k, v) -> v + 1);
-      if (current >= numRequests) {
-        return BoundedWindow.TIMESTAMP_MAX_VALUE;
+      if (req != null) {
+        int current = TEST_CONTEXTS.compute(testUuid, (k, v) -> v + 1);
+        if (current >= numRequests) {
+          return BoundedWindow.TIMESTAMP_MAX_VALUE;
+        }
       }
       return Instant.now();
     };

@@ -57,7 +57,8 @@ public class GrpcRequestReadTest {
   @Test
   @Timeout(15)
   void testRun() throws ExecutionException, InterruptedException {
-    Pipeline p = TransactionRunner.registerCoders(Pipeline.create());
+    Pipeline p = Pipeline.create();
+    TransactionRunner.registerCoders(p);
     int numRequests = 10;
     SerializableFunction<Request, Instant> watermarkFn =
         TestUtils.getMaxRequestsFn(testUuid, numRequests);
