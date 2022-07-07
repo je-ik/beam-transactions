@@ -95,6 +95,8 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     @StateId("seqId")
     final StateSpec<MapState<String, Long>> lastWriteSeqIdSpec = StateSpecs.map();
 
+    // FIXME: can be rewritten to sort by seqId
+    @RequiresStableInput
     @RequiresTimeSortedInput
     @ProcessElement
     public void process(
@@ -116,9 +118,6 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
         } else {
           output.output(commit.toBuilder().setStatus(412).build());
         }
-      } else if (actions.size() == 1 && actions.get(0).getRequest().getType().equals(Type.READ)) {
-        // pass reads through, so that it can reach client
-        output.output(actions.get(0));
       }
     }
 

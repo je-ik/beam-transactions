@@ -59,7 +59,6 @@ import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -241,21 +240,22 @@ public class TransactionRunnerTest {
   void testTransactionsConsistencyDirect() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs("--requestPort=" + port, "--runner=direct").create();
-    testTransactionConsistencyWithRunner(10000, opts);
+    testTransactionConsistencyWithRunner(2000, opts);
   }
 
   @Test
   @Timeout(value = 4, unit = TimeUnit.MINUTES)
-  @Disabled
   void testTransactionsConsistencyFlink() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs(
                 "--requestPort=" + port,
+                "--numInitialSplits=10",
                 "--runner=flink",
                 "--checkpointingInterval=10",
                 // "--maxBundleSize=100",
                 "--maxBundleTimeMills=10",
-                "--parallelism=8")
+                "--parallelism=8",
+                "--shutdownSourcesAfterIdleMs=120000")
             .create();
     testTransactionConsistencyWithRunner(10000, opts);
   }
@@ -278,7 +278,6 @@ public class TransactionRunnerTest {
           try {
             PipelineResult res = p.run();
             err.complete(res.waitUntilFinish());
-            return res;
           } catch (Throwable ex) {
             err.completeExceptionally(ex);
           }
@@ -311,15 +310,7 @@ public class TransactionRunnerTest {
                     response
                         .getKeyvalueList()
                         .stream()
-                        // FIXME: the response should be unique!
-                        .collect(
-                            Collectors.toMap(
-                                KeyValue::getKey,
-                                KeyValue::getValue,
-                                (a, b) -> {
-                                  assertEquals(a, b);
-                                  return a;
-                                }));
+                        .collect(Collectors.toMap(KeyValue::getKey, KeyValue::getValue));
                 String transactionId = response.getTransactionId();
                 double nextFrom = current.get(from) - amount;
                 double nextTo = current.get(to) + amount;
@@ -362,12 +353,17 @@ public class TransactionRunnerTest {
     assertEquals(State.DONE, err.get());
     assertEquals((numTransfers / parallelism) * parallelism, committedTransactions.get());
     double sum = 0.0;
+    int nonZeroAmounts = 0;
     Value zero = new Value(0.0, 0L);
     for (int i = 0; i < clients; i++) {
       Value value = MoreObjects.firstNonNull(accessor.get("client" + i), zero);
       sum += value.getAmount();
+      if (value.getSeqId() > 0) {
+        nonZeroAmounts++;
+      }
     }
     assertEquals(0.0, sum, 0.0001);
+    assertTrue(nonZeroAmounts > Math.min(numTransfers, clients / 2));
   }
 
   private TransactionRunner createRunner(MemoryDatabaseAccessor accessor) {

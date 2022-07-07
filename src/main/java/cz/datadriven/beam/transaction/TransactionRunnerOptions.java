@@ -40,4 +40,28 @@ public interface TransactionRunnerOptions extends PipelineOptions {
   int getSourceParallelism();
 
   void setSourceParallelism(int parallelism);
+
+  String getCassandraAuthority();
+
+  void setCassandraAuthority(String authority);
+
+  @Default.String("beam")
+  String getCassandraKeyspace();
+
+  void setCassandraKeyspace(String keyspace);
+
+  @Default.String("amounts")
+  String getCassandraTable();
+
+  void setCassandraTable(String table);
+
+  @Default.Integer(50)
+  int getGrpcReadDelay();
+
+  void setGrpcReadDelay(int delay);
+
+  @Default.Integer(1)
+  int getNumInitialSplits();
+
+  void setNumInitialSplits(int splits);
 }

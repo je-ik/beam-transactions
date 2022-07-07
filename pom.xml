@@ -30,22 +30,23 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <autoservice.version>1.0</autoservice.version>
-    <beam.version>2.38.0</beam.version>
+    <beam.version>2.40.0</beam.version>
+    <flink.version>1.14.5</flink.version>
     <error-prone.version>2.4.0</error-prone.version>
-    <grpc.version>1.41.1</grpc.version>
+    <grpc.version>1.45.1</grpc.version>
     <guava.version>31.0.1-jre</guava.version>
     <hamcrest.version>2.2</hamcrest.version>
     <jupiter.version>5.7.1</jupiter.version>
-    <log4j.version>2.17.1</log4j.version>
     <lombok.version>1.18.22</lombok.version>
     <maven-compiler-plugin.version>3.8.1</maven-compiler-plugin.version>
     <maven-ext-os.version>1.6.2</maven-ext-os.version>
     <maven-protobuf-plugin.version>0.6.1</maven-protobuf-plugin.version>
     <maven-shade-plugin.version>3.2.4</maven-shade-plugin.version>
     <maven-surefire-plugin.version>3.0.0-M5</maven-surefire-plugin.version>
-    <proto.version>3.19.2</proto.version>
-    <protoc.version>3.19.2</protoc.version>
+    <proto.version>3.19.4</proto.version>
+    <protoc.version>3.19.4</protoc.version>
     <slf4j.version>1.7.30</slf4j.version>
+    <log4j.version>2.17.1</log4j.version>
     <spotless.version>2.0.1</spotless.version>
   </properties>
 
@@ -182,6 +183,12 @@
                   </excludes>
                 </filter>
               </filters>
+              <relocations>
+                <relocation>
+                  <pattern>com.fasterxml.jackson.</pattern>
+                  <shadedPattern>cz.datadriven.beam.com.fasterxml.jackson.</shadedPattern>
+                </relocation>
+              </relocations>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
@@ -191,6 +198,122 @@
       </plugin>
     </plugins>
   </build>
+
+  <dependencyManagement>
+
+    <dependencies>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-core</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-stub</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-protobuf</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-netty</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-api</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-alts</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-context</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-census</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-netty-shaded</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-auth</artifactId>
+        <version>${grpc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-clients_2.11</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-streaming-java_2.11</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-core</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-runtime</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-metrics-core</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-java</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-optimizer</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-annotations</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
+
+    </dependencies>
+
+  </dependencyManagement>
 
   <dependencies>
 
@@ -211,6 +334,12 @@
       <groupId>org.apache.beam</groupId>
       <artifactId>beam-sdks-java-core</artifactId>
       <version>${beam.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.apache.avro</groupId>
+          <artifactId>avro</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
@@ -242,6 +371,18 @@
       <artifactId>grpc-netty</artifactId>
       <version>${grpc.version}</version>
     </dependency>
+
+    <dependency>
+      <groupId>com.datastax.cassandra</groupId>
+      <artifactId>cassandra-driver-core</artifactId>
+      <version>3.11.0</version>
+    </dependency>
+
+    <!--dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-handler</artifactId>
+      <version>${netty.version}</version>
+    </dependency-->
 
     <dependency>
       <groupId>com.google.auto.service</groupId>
@@ -279,7 +420,30 @@
       <groupId>org.apache.beam</groupId>
       <artifactId>beam-runners-flink-1.14</artifactId>
       <version>${beam.version}</version>
-      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-clients_2.12</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-streaming-java_2.12</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.avro</groupId>
+          <artifactId>avro</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-clients_2.11</artifactId>
+    </dependency>
+   
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-streaming-java_2.11</artifactId>
     </dependency>
 
     <dependency>
@@ -299,14 +463,18 @@
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-slf4j-impl</artifactId>
       <version>${log4j.version}</version>
-      <scope>test</scope>
     </dependency>
 
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-core</artifactId>
       <version>${log4j.version}</version>
-      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.codahale.metrics</groupId>
+      <artifactId>metrics-core</artifactId>
+      <version>3.0.2</version>
     </dependency>
 
   </dependencies>

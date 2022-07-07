@@ -125,8 +125,11 @@ public class TransactionRunner {
 
   @VisibleForTesting
   DatabaseAccessor createAccessor(PipelineOptions opts) {
-    // FIXME
-    return new MemoryDatabaseAccessor();
+    TransactionRunnerOptions runnerOpts = opts.as(TransactionRunnerOptions.class);
+    return new CassandraDatabaseAccessor(
+        runnerOpts.getCassandraAuthority(),
+        runnerOpts.getCassandraKeyspace(),
+        runnerOpts.getCassandraTable());
   }
 
   @VisibleForTesting

@@ -104,12 +104,15 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
     public boolean tryClaim(Void position) {
       if (SERVER == null) {
         synchronized (GrpcRequestReadFn.class) {
-          SERVER = newServer();
-          log.info("Running new server.");
-          try {
-            SERVER.start();
-          } catch (IOException e) {
-            throw new RuntimeException(e);
+          if (SERVER == null) {
+            SERVER = newServer();
+            log.info("Running new server.");
+            try {
+              SERVER.start();
+            } catch (IOException e) {
+              // FIXME
+              // throw new RuntimeException(e);
+            }
           }
         }
       }
@@ -137,6 +140,8 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   }
 
   @Getter private final int port;
+  private final int readDelay;
+  private final int initialSplits;
   private final SerializableFunction<Request, Instant> watermarkFn;
   private final List<KV<Request, StreamObserver<ServerAck>>> claimedRequests = new ArrayList<>();
 
@@ -144,12 +149,21 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       TransactionRunnerOptions runnerOpts, SerializableFunction<Request, Instant> watermarkFn) {
 
     this.port = runnerOpts.getRequestPort();
+    this.readDelay = runnerOpts.getGrpcReadDelay();
+    this.initialSplits = runnerOpts.getNumInitialSplits();
     this.watermarkFn = watermarkFn == null ? tmp -> Instant.now() : watermarkFn;
   }
 
   @GetInitialRestriction
   public String getInitialRestriction() {
     return UUID.randomUUID().toString();
+  }
+
+  @SplitRestriction
+  public void splitRestriction(OutputReceiver<String> output) {
+    for (int i = 0; i < initialSplits; i++) {
+      output.output(UUID.randomUUID().toString());
+    }
   }
 
   @GetRestrictionCoder
@@ -216,10 +230,10 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
             return ProcessContinuation.stop();
           }
         } while (polled != null);
-        return ProcessContinuation.resume();
+        return ProcessContinuation.resume().withResumeDelay(Duration.millis(readDelay));
       } catch (InterruptedException e) {
         log.info("Interrupted while processing requests.", e);
-        return ProcessContinuation.stop();
+        return ProcessContinuation.resume();
       }
     }
     return ProcessContinuation.stop();

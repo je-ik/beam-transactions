@@ -90,7 +90,6 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
       accessor.close();
     }
 
-    @RequiresStableInput
     @ProcessElement
     public void process(
         @Element KV<String, KeyValue> element,

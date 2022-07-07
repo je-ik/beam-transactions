@@ -134,7 +134,7 @@ public class VerifyTransactionsTest {
                             String.format(
                                 "%s:%d:%d",
                                 a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "READ:2:0", "WRITE:2:0");
+    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "WRITE:2:0");
     p.run();
   }
 
@@ -196,8 +196,7 @@ public class VerifyTransactionsTest {
                             String.format(
                                 "%s:%d:%d",
                                 a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res)
-        .containsInAnyOrder("COMMIT:2:200", "COMMIT:3:412", "READ:2:0", "READ:3:0", "WRITE:2:0");
+    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "COMMIT:3:412", "WRITE:2:0");
     p.run();
   }
 
