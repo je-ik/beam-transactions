@@ -155,7 +155,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(20)
+  @Timeout(30)
   void testTransactionsEndToEndWithCommitRejected()
       throws ExecutionException, InterruptedException, TimeoutException {
 
@@ -236,7 +236,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(value = 4, unit = TimeUnit.MINUTES)
+  @Timeout(value = 5, unit = TimeUnit.MINUTES)
   void testTransactionsConsistencyDirect() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs("--requestPort=" + port, "--runner=direct").create();
@@ -244,7 +244,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(value = 4, unit = TimeUnit.MINUTES)
+  @Timeout(value = 5, unit = TimeUnit.MINUTES)
   void testTransactionsConsistencyFlink() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs(
@@ -255,7 +255,7 @@ public class TransactionRunnerTest {
                 // "--maxBundleSize=100",
                 "--maxBundleTimeMills=10",
                 "--parallelism=8",
-                "--shutdownSourcesAfterIdleMs=120000")
+                "--shutdownSourcesAfterIdleMs=240000")
             .create();
     testTransactionConsistencyWithRunner(10000, opts);
   }

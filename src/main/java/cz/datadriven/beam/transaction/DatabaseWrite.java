@@ -89,7 +89,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
     public void tearDown() {
       accessor.close();
     }
-
+    
     @ProcessElement
     public void process(
         @Element KV<String, KeyValue> element,
