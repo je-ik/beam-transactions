@@ -35,6 +35,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.joda.time.Instant;
 
 public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
@@ -89,16 +90,17 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
     public void tearDown() {
       accessor.close();
     }
-    
+
     @ProcessElement
     public void process(
         @Element KV<String, KeyValue> element,
+        @Timestamp Instant ts,
         @StateId("lastWritten") ValueState<Long> lastWritten) {
 
       long written = MoreObjects.firstNonNull(lastWritten.read(), 0L);
       KeyValue value = Objects.requireNonNull(element.getValue());
       if (written < value.getSeqId()) {
-        accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId()));
+        accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId(), ts.getMillis()));
         lastWritten.write(value.getSeqId());
       }
     }

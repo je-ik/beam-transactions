@@ -32,9 +32,10 @@ public class DatabaseReadTest {
   @Test
   void testRead() {
     DatabaseAccessor accessor = new MemoryDatabaseAccessor();
-    accessor.set("1", new DatabaseAccessor.Value(1.0, 1L));
-    accessor.set("2", new DatabaseAccessor.Value(2.0, 2L));
-    accessor.set("3", new DatabaseAccessor.Value(3.0, 3L));
+    long now = System.currentTimeMillis();
+    accessor.set("1", new DatabaseAccessor.Value(1.0, 1L, now));
+    accessor.set("2", new DatabaseAccessor.Value(2.0, 2L, now));
+    accessor.set("3", new DatabaseAccessor.Value(3.0, 3L, now));
     List<Internal> inputs = Arrays.asList(newRequest(1L, "1", "3"), newRequest(2L, "2", "4"));
     Pipeline pipeline = Pipeline.create();
     PCollection<String> result =

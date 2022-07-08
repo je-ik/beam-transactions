@@ -90,8 +90,9 @@ public class TransactionRunnerTest {
 
     Pipeline p = Pipeline.create(PipelineOptionsFactory.fromArgs("--requestPort=" + port).create());
     MemoryDatabaseAccessor accessor = new MemoryDatabaseAccessor();
-    accessor.set("alice", Value.builder().amount(100.0).seqId(1L).build());
-    accessor.set("bob", Value.builder().amount(50.0).seqId(1L).build());
+    long now = System.currentTimeMillis();
+    accessor.set("alice", new Value(100.0, 1L, now));
+    accessor.set("bob", new Value(50.0, 1L, now));
     TransactionRunner runner = createRunner(accessor);
     runner.createRunnablePipeline(
         p,
@@ -161,8 +162,9 @@ public class TransactionRunnerTest {
 
     Pipeline p = Pipeline.create(PipelineOptionsFactory.fromArgs("--requestPort=" + port).create());
     MemoryDatabaseAccessor accessor = new MemoryDatabaseAccessor();
-    accessor.set("alice", Value.builder().amount(100.0).seqId(1L).build());
-    accessor.set("bob", Value.builder().amount(50.0).seqId(1L).build());
+    long now = System.currentTimeMillis();
+    accessor.set("alice", new Value(100.0, 1L, now));
+    accessor.set("bob", new Value(50.0, 1L, now));
     TransactionRunner runner = createRunner(accessor);
     runner.createRunnablePipeline(p, afterCommits(2));
     BlockingQueue<Optional<Throwable>> err = new ArrayBlockingQueue<>(1);
@@ -354,7 +356,7 @@ public class TransactionRunnerTest {
     assertEquals((numTransfers / parallelism) * parallelism, committedTransactions.get());
     double sum = 0.0;
     int nonZeroAmounts = 0;
-    Value zero = new Value(0.0, 0L);
+    Value zero = new Value(0.0, 0L, Long.MIN_VALUE);
     for (int i = 0; i < clients; i++) {
       Value value = MoreObjects.firstNonNull(accessor.get("client" + i), zero);
       sum += value.getAmount();

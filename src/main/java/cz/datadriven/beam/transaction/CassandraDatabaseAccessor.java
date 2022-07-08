@@ -78,7 +78,8 @@ public class CassandraDatabaseAccessor implements DatabaseAccessor {
   @Override
   public void set(String key, Value value) {
     ensureSession();
-    BoundStatement statement = writeStatement.bind(value.getAmount(), value.getSeqId(), key);
+    BoundStatement statement =
+        writeStatement.bind(value.getAmount(), value.getSeqId(), key, value.getStamp() * 1000L);
     session.execute(statement);
   }
 
@@ -92,7 +93,7 @@ public class CassandraDatabaseAccessor implements DatabaseAccessor {
       return null;
     }
     Row row = Iterables.getOnlyElement(rows);
-    return new Value(row.get(0, Double.class), row.get(1, Long.class));
+    return new Value(row.getDouble(0), row.getLong(1), row.getLong(2) / 1000);
   }
 
   private void ensureSession() {
@@ -100,11 +101,14 @@ public class CassandraDatabaseAccessor implements DatabaseAccessor {
       session = cluster.newSession();
       readStatement =
           session.prepare(
-              String.format("SELECT amount, seqId FROM %s.%s WHERE id = ?", keyspace, table));
+              String.format(
+                  "SELECT amount, seqId, WRITETIME(amount) FROM %s.%s WHERE id = ?",
+                  keyspace, table));
       writeStatement =
           session.prepare(
               String.format(
-                  "INSERT INTO %s.%s (amount, seqId, id) VALUES (?, ?, ?)", keyspace, table));
+                  "INSERT INTO %s.%s (amount, seqId, id) VALUES (?, ?, ?) USING TIMESTAMP ?",
+                  keyspace, table));
     }
   }
 }
