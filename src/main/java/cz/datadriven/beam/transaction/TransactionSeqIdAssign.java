@@ -23,6 +23,10 @@ import org.apache.beam.sdk.state.MapState;
 import org.apache.beam.sdk.state.ReadableState;
 import org.apache.beam.sdk.state.StateSpec;
 import org.apache.beam.sdk.state.StateSpecs;
+import org.apache.beam.sdk.state.TimeDomain;
+import org.apache.beam.sdk.state.Timer;
+import org.apache.beam.sdk.state.TimerSpec;
+import org.apache.beam.sdk.state.TimerSpecs;
 import org.apache.beam.sdk.state.ValueState;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
@@ -32,6 +36,8 @@ import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.joda.time.Duration;
+import org.joda.time.Instant;
 
 public class TransactionSeqIdAssign
     extends PTransform<PCollection<Internal>, PCollection<Internal>> {
@@ -46,32 +52,74 @@ public class TransactionSeqIdAssign
     final StateSpec<ValueState<Long>> seqIdSpec = StateSpecs.value();
 
     @StateId("seqIdMap")
-    final StateSpec<MapState<String, Long>> seqIdMapSpec = StateSpecs.map();
+    final StateSpec<MapState<String, KV<Long, Long>>> seqIdMapSpec = StateSpecs.map();
+
+    @TimerId("cleanup")
+    final TimerSpec cleanupTimerSpec = TimerSpecs.timer(TimeDomain.EVENT_TIME);
+
+    private final int cleanupInterval;
+
+    public TransactionSeqIdAssignmentFn(int cleanupInterval) {
+      this.cleanupInterval = cleanupInterval;
+    }
 
     @ProcessElement
     public void process(
         @Element KV<Void, Internal> element,
+        @Timestamp Instant ts,
         @StateId("seqId") final ValueState<Long> seqId,
-        @StateId("seqIdMap") MapState<String, Long> seqIdMap,
+        @StateId("seqIdMap") MapState<String, KV<Long, Long>> seqIdMap,
+        @TimerId("cleanup") Timer cleanupTimer,
         OutputReceiver<Internal> output) {
 
       Internal request = element.getValue();
       AtomicLong value = new AtomicLong();
-      ReadableState<Long> transactionSeqId =
+      ReadableState<KV<Long, Long>> transactionSeqId =
           seqIdMap.computeIfAbsent(
               request.getTransactionId(),
               tmp -> {
                 long nextSeqId = MoreObjects.firstNonNull(seqId.read(), 1000L);
                 seqId.write(nextSeqId + 1);
                 value.set(nextSeqId);
-                return nextSeqId;
+                return KV.of(nextSeqId, ts.getMillis());
               });
-      long assignedSeqId = MoreObjects.firstNonNull(transactionSeqId.read(), value.get());
+      KV<Long, Long> assigned = transactionSeqId.read();
+      final long assignedSeqId;
+      if (assigned == null) {
+        assignedSeqId = value.get();
+        cleanupTimer.offset(Duration.standardSeconds(cleanupInterval)).setRelative();
+      } else {
+        assignedSeqId = assigned.getKey();
+      }
       output.output(request.toBuilder().setSeqId(assignedSeqId).build());
+    }
+
+    @OnTimer("cleanup")
+    public void onTimer(
+        @Timestamp Instant stamp,
+        @StateId("seqIdMap") MapState<String, KV<Long, Long>> seqIdMap,
+        @TimerId("cleanup") Timer cleanupTimer) {
+
+      long maxAcceptable = stamp.getMillis() - cleanupInterval * 1000L;
+      seqIdMap
+          .entries()
+          .read()
+          .forEach(
+              e -> {
+                if (e.getValue().getValue() < maxAcceptable) {
+                  seqIdMap.remove(e.getKey());
+                }
+              });
+      if (stamp.isBefore(Constants.MAX_TIMER)) {
+        cleanupTimer.offset(Duration.standardSeconds(cleanupInterval)).setRelative();
+      }
     }
   }
 
   public PCollection<Internal> expand(PCollection<Internal> input) {
+    TransactionRunnerOptions opts =
+        input.getPipeline().getOptions().as(TransactionRunnerOptions.class);
+    int cleanupInterval = opts.getTransactionCleanupIntervalSeconds();
     return input
         .apply(
             MapElements.into(
@@ -87,7 +135,7 @@ public class TransactionSeqIdAssign
                       }
                       return KV.of(null, outputRequest);
                     }))
-        .apply(ParDo.of(new TransactionSeqIdAssignmentFn()));
+        .apply(ParDo.of(new TransactionSeqIdAssignmentFn(cleanupInterval)));
   }
 
   private String newTransactionUid() {

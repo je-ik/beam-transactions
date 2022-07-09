@@ -64,4 +64,9 @@ public interface TransactionRunnerOptions extends PipelineOptions {
   int getNumInitialSplits();
 
   void setNumInitialSplits(int splits);
+
+  @Default.Integer(30)
+  int getTransactionCleanupIntervalSeconds();
+
+  void setTransactionCleanupIntervalSeconds(int interval);
 }

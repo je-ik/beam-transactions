@@ -59,6 +59,7 @@ import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -247,6 +248,7 @@ public class TransactionRunnerTest {
 
   @Test
   @Timeout(value = 5, unit = TimeUnit.MINUTES)
+  @Disabled
   void testTransactionsConsistencyFlink() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs(

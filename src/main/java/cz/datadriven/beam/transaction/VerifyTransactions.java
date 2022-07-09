@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.state.BagState;
@@ -110,6 +111,12 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     @TimerId("sortTimer")
     final TimerSpec sortTimerSpec = TimerSpecs.timer(TimeDomain.EVENT_TIME);
 
+    private final long cleanupIntervalMs;
+
+    public VerifyTransactionsFn(long cleanupIntervalMs) {
+      this.cleanupIntervalMs = cleanupIntervalMs;
+    }
+
     @ProcessElement
     public void process(
         @Element KV<Void, List<Internal>> element,
@@ -167,6 +174,12 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
           .map(TimestampedValue::getValue)
           .forEachOrdered(
               list -> processOrderedElement(list, context.timestamp(), lastWriteSeqId, output));
+      long cleanupStamp = context.fireTimestamp().getMillis() - cleanupIntervalMs;
+      for (Map.Entry<String, KV<Long, Long>> e : lastWriteSeqId.entries().read()) {
+        if (e.getValue().getValue() < cleanupStamp) {
+          lastWriteSeqId.remove(e.getKey());
+        }
+      }
     }
 
     private void processOrderedElement(
@@ -263,10 +276,13 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
 
   @Override
   public PCollection<Internal> expand(PCollection<Internal> input) {
+    TransactionRunnerOptions opts =
+        input.getPipeline().getOptions().as(TransactionRunnerOptions.class);
+    int cleanupInterval = opts.getTransactionCleanupIntervalSeconds();
     return input
         .apply(WithKeys.of(Internal::getTransactionId).withKeyType(TypeDescriptors.strings()))
         .apply("gather", ParDo.of(new GatherTransactionRequestsFn()))
         .apply(WithKeys.of((Void) null))
-        .apply("verify", ParDo.of(new VerifyTransactionsFn()));
+        .apply("verify", ParDo.of(new VerifyTransactionsFn(cleanupInterval * 1000L)));
   }
 }
