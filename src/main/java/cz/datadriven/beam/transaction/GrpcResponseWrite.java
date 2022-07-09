@@ -130,9 +130,7 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
 
             @Override
             public void onError(Throwable throwable) {
-              // FIXME
               openChannels.remove(key).getChannel().shutdown();
-              throw new RuntimeException(throwable);
             }
 
             @Override

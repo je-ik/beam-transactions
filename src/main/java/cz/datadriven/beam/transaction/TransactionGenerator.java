@@ -15,8 +15,10 @@
  */
 package cz.datadriven.beam.transaction;
 
-import com.codahale.metrics.SlidingWindowReservoir;
+import com.codahale.metrics.Reservoir;
+import com.codahale.metrics.SlidingTimeWindowReservoir;
 import com.codahale.metrics.Snapshot;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import cz.datadriven.beam.transaction.proto.Server.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.ReadPayload;
@@ -32,8 +34,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
@@ -77,12 +77,12 @@ public class TransactionGenerator {
   private final int numKeys;
   private int transactionTimeoutSeconds;
 
-  private final SlidingWindowReservoir latency = new SlidingWindowReservoir(30);
-  private final SlidingWindowReservoir committed = new SlidingWindowReservoir(30);
-  private final SlidingWindowReservoir rejected = new SlidingWindowReservoir(30);
-  private final AtomicLong lastReported = new AtomicLong();
-  private final AtomicInteger numCommitted = new AtomicInteger();
-  private final AtomicInteger numRejected = new AtomicInteger();
+  private final SlidingTimeWindowReservoir latency =
+      new SlidingTimeWindowReservoir(30, TimeUnit.SECONDS);
+  private final SlidingTimeWindowReservoir committed =
+      new SlidingTimeWindowReservoir(30, TimeUnit.SECONDS);
+  private final SlidingTimeWindowReservoir rejected =
+      new SlidingTimeWindowReservoir(30, TimeUnit.SECONDS);
 
   public TransactionGenerator(
       String address,
@@ -121,20 +121,8 @@ public class TransactionGenerator {
         latencySnapshot.getMedian(),
         latencySnapshot.get99thPercentile(),
         latencySnapshot.get999thPercentile());
-    log.info(
-        "Committed avg, stddev, median, 99th pct, 99.9 pct: {} {} {} {} {}",
-        committedSnapshot.getMean(),
-        committedSnapshot.getStdDev(),
-        committedSnapshot.getMedian(),
-        committedSnapshot.get99thPercentile(),
-        committedSnapshot.get999thPercentile());
-    log.info(
-        "Rejected avg, stddev, median, 99th pct, 99.9 pct: {} {} {} {} {}",
-        rejectedSnapshot.getMean(),
-        rejectedSnapshot.getStdDev(),
-        rejectedSnapshot.getMedian(),
-        rejectedSnapshot.get99thPercentile(),
-        rejectedSnapshot.get999thPercentile());
+    log.info("Committed avg per sec {}", committedSnapshot.getValues().length / 30.);
+    log.info("Rejected avg per sec {}", rejectedSnapshot.getValues().length / 30.);
   }
 
   private void runClient() {
@@ -211,22 +199,28 @@ public class TransactionGenerator {
     }
   }
 
-  private void increaseCommitted() {
-    increase(numCommitted);
+  @VisibleForTesting
+  void increaseCommitted() {
+    increase(committed);
   }
 
-  private void increaseRejected() {
-    increase(numRejected);
+  @VisibleForTesting
+  void increaseRejected() {
+    increase(rejected);
   }
 
-  private void increase(AtomicInteger which) {
-    long now = System.currentTimeMillis() % 1000;
-    which.incrementAndGet();
-    long lastReportedIn = lastReported.getAndUpdate(current -> Long.max(current, now));
-    if (lastReportedIn < now) {
-      this.committed.update(numCommitted.getAndSet(0));
-      this.rejected.update(numRejected.getAndSet(0));
-    }
+  @VisibleForTesting
+  Snapshot getCommittedSnapshot() {
+    return committed.getSnapshot();
+  }
+
+  @VisibleForTesting
+  Snapshot getRejectedSnapshot() {
+    return rejected.getSnapshot();
+  }
+
+  private void increase(Reservoir which) {
+    which.update(1);
   }
 
   private String pick(Random random) {
