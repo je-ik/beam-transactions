@@ -22,8 +22,11 @@ import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
+import java.io.IOException;
 import java.util.Set;
 import javax.annotation.Nullable;
+import org.apache.beam.runners.flink.FlinkPipelineOptions;
+import org.apache.beam.runners.flink.FlinkStateBackendFactory;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
@@ -36,6 +39,8 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
+import org.apache.flink.runtime.state.StateBackend;
 import org.joda.time.Instant;
 
 /**
@@ -51,6 +56,18 @@ public class TransactionRunner {
     app.run();
   }
 
+  public static class IncrementalStateBackendFactory implements FlinkStateBackendFactory {
+
+    @Override
+    public StateBackend createStateBackend(FlinkPipelineOptions options) {
+      try {
+        return new RocksDBStateBackend(options.getStateBackendStoragePath(), true);
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+
   private final PipelineOptions opts;
 
   @VisibleForTesting
@@ -60,6 +77,15 @@ public class TransactionRunner {
 
   public TransactionRunner(String[] args) {
     opts = PipelineOptionsFactory.fromArgs(args).create();
+    setupStateBackend(opts);
+  }
+
+  private void setupStateBackend(PipelineOptions opts) {
+    TransactionRunnerOptions runnerOpts = opts.as(TransactionRunnerOptions.class);
+    if (runnerOpts.getUseIncrementalCheckpoints()) {
+      FlinkPipelineOptions flinkOpts = opts.as(FlinkPipelineOptions.class);
+      flinkOpts.setStateBackendFactory(IncrementalStateBackendFactory.class);
+    }
   }
 
   void run() {

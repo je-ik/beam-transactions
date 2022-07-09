@@ -229,7 +229,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
           } else if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
             return ProcessContinuation.stop();
           }
-        } while (polled != null);
+        } while (polled != null && tracker.tryClaim(null));
         return ProcessContinuation.resume().withResumeDelay(Duration.millis(readDelay));
       } catch (InterruptedException e) {
         log.info("Interrupted while processing requests.", e);

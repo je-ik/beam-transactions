@@ -69,4 +69,9 @@ public interface TransactionRunnerOptions extends PipelineOptions {
   int getTransactionCleanupIntervalSeconds();
 
   void setTransactionCleanupIntervalSeconds(int interval);
+
+  @Default.Boolean(false)
+  boolean getUseIncrementalCheckpoints();
+
+  void setUseIncrementalCheckpoints(boolean value);
 }
