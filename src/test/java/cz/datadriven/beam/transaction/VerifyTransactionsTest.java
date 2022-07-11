@@ -56,20 +56,17 @@ public class VerifyTransactionsTest {
             "t1",
             1L,
             Request.newBuilder()
-                .setType(Type.WRITE)
+                .setType(Type.COMMIT)
                 .setWritePayload(
                     WritePayload.newBuilder()
                         .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(1.0)))
                 .build());
-    Internal commit = asInternal("t1", 1L, Request.newBuilder().setType(Type.COMMIT).build());
     Instant now = new Instant(0);
     TestStream<Internal> input =
         TestStream.create(ProtoCoder.of(Internal.getDefaultInstance()))
             .addElements(TimestampedValue.of(read, now))
             .advanceWatermarkTo(now)
             .addElements(TimestampedValue.of(write, now.plus(1)))
-            .advanceWatermarkTo(now.plus(1))
-            .addElements(TimestampedValue.of(commit, now.plus(2)))
             .advanceWatermarkToInfinity();
     Pipeline p = Pipeline.create();
     PCollection<String> result =
@@ -85,7 +82,7 @@ public class VerifyTransactionsTest {
                                 .sorted(Comparator.comparing(Type::getNumber))
                                 .collect(Collectors.toList())
                                 .toString()));
-    PAssert.that(result).containsInAnyOrder("[READ, WRITE, COMMIT]", "[READ]", "[WRITE]");
+    PAssert.that(result).containsInAnyOrder("[READ]", "[READ, COMMIT]");
     p.run();
   }
 
@@ -106,22 +103,19 @@ public class VerifyTransactionsTest {
             "t1",
             2L,
             Request.newBuilder()
-                .setType(Type.WRITE)
+                .setType(Type.COMMIT)
                 .setWritePayload(
                     WritePayload.newBuilder()
                         .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(1.0)))
                 .build(),
             Collections.singletonList(
                 Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
-    Internal commit = asInternal("t1", 2L, Request.newBuilder().setType(Type.COMMIT).build());
     Instant now = new Instant(0);
     TestStream<Internal> input =
         TestStream.create(ProtoCoder.of(Internal.getDefaultInstance()))
             .addElements(TimestampedValue.of(read, now))
             .advanceWatermarkTo(now)
             .addElements(TimestampedValue.of(write, now.plus(1)))
-            .advanceWatermarkTo(now.plus(1))
-            .addElements(TimestampedValue.of(commit, now.plus(2)))
             .advanceWatermarkToInfinity();
     Pipeline p = Pipeline.create();
     PCollection<String> res =
@@ -134,7 +128,7 @@ public class VerifyTransactionsTest {
                             String.format(
                                 "%s:%d:%d",
                                 a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "WRITE:2:0");
+    PAssert.that(res).containsInAnyOrder("COMMIT:2:200");
     p.run();
   }
 
@@ -165,14 +159,13 @@ public class VerifyTransactionsTest {
             "t1",
             2L,
             Request.newBuilder()
-                .setType(Type.WRITE)
+                .setType(Type.COMMIT)
                 .setWritePayload(
                     WritePayload.newBuilder()
                         .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(1.0)))
                 .build(),
             Collections.singletonList(
                 Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
-    Internal commit = asInternal("t1", 2L, Request.newBuilder().setType(Type.COMMIT).build());
     Internal commit2 = asInternal("t2", 3L, Request.newBuilder().setType(Type.COMMIT).build());
     Instant now = new Instant(0);
     TestStream<Internal> input =
@@ -181,8 +174,6 @@ public class VerifyTransactionsTest {
             .advanceWatermarkTo(now)
             .addElements(TimestampedValue.of(write, now.plus(1)))
             .advanceWatermarkTo(now.plus(1))
-            .addElements(TimestampedValue.of(commit, now.plus(2)))
-            .advanceWatermarkTo(now.plus(2))
             .addElements(TimestampedValue.of(commit2, now.plus(3)))
             .advanceWatermarkToInfinity();
     Pipeline p = Pipeline.create();
@@ -196,7 +187,7 @@ public class VerifyTransactionsTest {
                             String.format(
                                 "%s:%d:%d",
                                 a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "COMMIT:3:412", "WRITE:2:0");
+    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "COMMIT:3:412");
     p.run();
   }
 

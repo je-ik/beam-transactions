@@ -52,7 +52,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
   @Override
   public PDone expand(PCollection<Internal> input) {
     input
-        .apply(Filter.by(a -> a.getRequest().getType().equals(Type.WRITE)))
+        .apply(Filter.by(a -> a.getRequest().getType().equals(Type.COMMIT)))
         .apply(
             FlatMapElements.into(
                     TypeDescriptors.kvs(

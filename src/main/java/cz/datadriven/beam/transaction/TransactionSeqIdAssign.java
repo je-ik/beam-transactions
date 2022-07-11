@@ -57,10 +57,10 @@ public class TransactionSeqIdAssign
     @TimerId("cleanup")
     final TimerSpec cleanupTimerSpec = TimerSpecs.timer(TimeDomain.EVENT_TIME);
 
-    private final int cleanupInterval;
+    private final long cleanupIntervalMs;
 
-    public TransactionSeqIdAssignmentFn(int cleanupInterval) {
-      this.cleanupInterval = cleanupInterval;
+    public TransactionSeqIdAssignmentFn(long cleanupIntervalMs) {
+      this.cleanupIntervalMs = cleanupIntervalMs;
     }
 
     @ProcessElement
@@ -87,7 +87,7 @@ public class TransactionSeqIdAssign
       final long assignedSeqId;
       if (assigned == null) {
         assignedSeqId = value.get();
-        cleanupTimer.offset(Duration.standardSeconds(cleanupInterval)).setRelative();
+        cleanupTimer.offset(Duration.millis(cleanupIntervalMs)).setRelative();
       } else {
         assignedSeqId = assigned.getKey();
       }
@@ -96,11 +96,12 @@ public class TransactionSeqIdAssign
 
     @OnTimer("cleanup")
     public void onTimer(
-        @Timestamp Instant stamp,
+        OnTimerContext context,
         @StateId("seqIdMap") MapState<String, KV<Long, Long>> seqIdMap,
         @TimerId("cleanup") Timer cleanupTimer) {
 
-      long maxAcceptable = stamp.getMillis() - cleanupInterval * 1000L;
+      Instant stamp = context.timestamp();
+      long maxAcceptable = stamp.getMillis() - cleanupIntervalMs;
       seqIdMap
           .entries()
           .read()
@@ -110,8 +111,12 @@ public class TransactionSeqIdAssign
                   seqIdMap.remove(e.getKey());
                 }
               });
-      if (stamp.isBefore(Constants.MAX_TIMER)) {
-        cleanupTimer.offset(Duration.standardSeconds(cleanupInterval)).setRelative();
+      if (context.fireTimestamp().getMillis() < Constants.MAX_TIMER.getMillis()) {
+        try {
+          cleanupTimer.offset(Duration.millis(cleanupIntervalMs)).setRelative();
+        } catch (ArithmeticException ex) {
+          // nop
+        }
       }
     }
   }
@@ -119,7 +124,7 @@ public class TransactionSeqIdAssign
   public PCollection<Internal> expand(PCollection<Internal> input) {
     TransactionRunnerOptions opts =
         input.getPipeline().getOptions().as(TransactionRunnerOptions.class);
-    int cleanupInterval = opts.getTransactionCleanupIntervalSeconds();
+    long cleanupIntervalMs = opts.getTransactionCleanupIntervalSeconds() * 1000L;
     return input
         .apply(
             MapElements.into(
@@ -135,7 +140,7 @@ public class TransactionSeqIdAssign
                       }
                       return KV.of(null, outputRequest);
                     }))
-        .apply(ParDo.of(new TransactionSeqIdAssignmentFn(cleanupInterval)));
+        .apply(ParDo.of(new TransactionSeqIdAssignmentFn(cleanupIntervalMs)));
   }
 
   private String newTransactionUid() {

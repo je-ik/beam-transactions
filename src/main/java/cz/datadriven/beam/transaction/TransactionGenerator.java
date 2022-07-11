@@ -25,12 +25,10 @@ import cz.datadriven.beam.transaction.proto.Server.ReadPayload;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import cz.datadriven.beam.transaction.proto.Server.Response;
-import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import cz.datadriven.beam.transaction.proto.Server.WritePayload;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -166,24 +164,18 @@ public class TransactionGenerator {
                 .collect(Collectors.toMap(KeyValue::getKey, KeyValue::getValue));
         double sourceAmount = result.get(source) - amount;
         double targetAmount = result.get(target) + amount;
-        Future<ServerAck> ack =
-            client.sendRequestAsync(
+        response =
+            client.sendSync(
                 Request.newBuilder()
                     .setTransactionId(transactionId)
-                    .setType(Type.WRITE)
+                    .setType(Type.COMMIT)
                     .setWritePayload(
                         WritePayload.newBuilder()
                             .addKeyValue(
                                 KeyValue.newBuilder().setKey(source).setValue(sourceAmount))
                             .addKeyValue(
                                 KeyValue.newBuilder().setKey(target).setValue(targetAmount)))
-                    .build());
-        ServerAck serverAck = ack.get();
-        Preconditions.checkArgument(
-            serverAck.getStatus() == 200, "Invalid status in %s", serverAck);
-        response =
-            client.sendSync(
-                Request.newBuilder().setTransactionId(transactionId).setType(Type.COMMIT).build(),
+                    .build(),
                 transactionTimeoutSeconds,
                 TimeUnit.SECONDS);
         if (response.getStatus() == 200) {

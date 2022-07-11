@@ -60,13 +60,14 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     private final Map<String, ChannelWithObserver> openChannels = new ConcurrentHashMap<>();
 
     @StateId("dummy")
-    final StateSpec<ValueState<Boolean>> dummySpec = StateSpecs.value();
+    private final StateSpec<ValueState<Boolean>> dummySpec = StateSpecs.value();
 
     @Teardown
     public void tearDown() {
       openChannels.values().forEach(v -> v.getChannel().shutdown());
     }
 
+    @RequiresStableInput
     @ProcessElement
     public void process(@Element KV<String, Internal> element) {
       if (element.getValue().getRequest().getRequestUid().isEmpty()) {

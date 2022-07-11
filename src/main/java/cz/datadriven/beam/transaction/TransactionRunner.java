@@ -21,7 +21,6 @@ import com.google.protobuf.GeneratedMessageV3;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server;
 import cz.datadriven.beam.transaction.proto.Server.Request;
-import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import java.io.IOException;
 import java.util.Set;
 import javax.annotation.Nullable;
@@ -32,12 +31,10 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Filter;
 import org.apache.beam.sdk.transforms.Flatten;
-import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SerializableFunction;
-import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
-import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
 import org.apache.flink.runtime.state.StateBackend;
@@ -114,39 +111,30 @@ public class TransactionRunner {
             .apply(Filter.by(r -> r.getRequest().hasReadPayload()))
             .apply("databaseRead", DatabaseRead.of(accessor));
 
-    PCollection<Internal> resolved =
+    PCollection<Internal> verified =
         PCollectionList.of(readResponses)
             .and(requests.apply(Filter.by(r -> !r.getRequest().hasReadPayload())))
-            .apply(Flatten.pCollections());
+            .apply("flattenReadsAndWrites", Flatten.pCollections())
+            .apply("verify", VerifyTransactions.of());
 
-    PCollection<Internal> resolvedResponses =
-        resolved.apply(
-            Filter.by(
-                r ->
-                    r.getRequest().getType().equals(Type.READ)
-                        || r.getRequest().getType().equals(Type.WRITE)));
-
-    PCollection<Internal> verified = resolved.apply("verify", VerifyTransactions.of());
     verified
-        .apply(Filter.by(i -> i.getRequest().getType().equals(Type.WRITE)))
+        .apply(Filter.by(i -> i.getStatus() == 200))
         .apply("databaseWrite", DatabaseWrite.of(accessor));
 
     PCollection<Internal> responses =
-        PCollectionList.of(verified).and(resolvedResponses).apply(Flatten.pCollections());
+        PCollectionList.of(readResponses)
+            .and(verified)
+            .apply("flattenResponses", Flatten.pCollections());
+    writeResponses("writeCommitResponses", responses);
+  }
 
+  private void writeResponses(String name, PCollection<Internal> responses) {
     responses
         .apply(
-            MapElements.into(
-                    TypeDescriptors.kvs(
-                        TypeDescriptors.strings(), TypeDescriptor.of(Internal.class)))
-                .via(
-                    r ->
-                        KV.of(
-                            r.getRequest().getResponseHost()
-                                + ":"
-                                + r.getRequest().getResponsePort(),
-                            r)))
-        .apply("writeResponses", GrpcResponseWrite.of());
+            WithKeys.<String, Internal>of(
+                    r -> r.getRequest().getResponseHost() + ":" + r.getRequest().getResponsePort())
+                .withKeyType(TypeDescriptors.strings()))
+        .apply(name, GrpcResponseWrite.of());
   }
 
   @VisibleForTesting

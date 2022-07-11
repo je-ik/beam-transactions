@@ -26,7 +26,6 @@ import cz.datadriven.beam.transaction.proto.Server.ReadPayload;
 import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import cz.datadriven.beam.transaction.proto.Server.Response;
-import cz.datadriven.beam.transaction.proto.Server.ServerAck;
 import cz.datadriven.beam.transaction.proto.Server.WritePayload;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -59,7 +58,6 @@ import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -132,20 +130,16 @@ public class TransactionRunnerTest {
       assertEquals(100.0, response.getKeyvalueList().get(0).getValue(), 0.001);
       assertEquals("bob", response.getKeyvalueList().get(1).getKey());
       assertEquals(50.0, response.getKeyvalueList().get(1).getValue(), 0.001);
-      Future<ServerAck> ack =
-          client.sendRequestAsync(
+      response =
+          client.sendSync(
               Request.newBuilder()
-                  .setType(Type.WRITE)
+                  .setType(Type.COMMIT)
                   .setTransactionId(transactionId)
                   .setWritePayload(
                       WritePayload.newBuilder()
                           .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(50.0))
                           .addKeyValue(KeyValue.newBuilder().setKey("bob").setValue(100.0)))
-                  .build());
-      assertEquals(200, ack.get().getStatus());
-      response =
-          client.sendSync(
-              Request.newBuilder().setType(Type.COMMIT).setTransactionId(transactionId).build(),
+                  .build(),
               5,
               TimeUnit.SECONDS);
       assertEquals(200, response.getStatus());
@@ -196,7 +190,7 @@ public class TransactionRunnerTest {
       response =
           client.sendSync(
               Request.newBuilder()
-                  .setType(Type.WRITE)
+                  .setType(Type.COMMIT)
                   .setWritePayload(
                       WritePayload.newBuilder()
                           .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(75.0))
@@ -206,28 +200,17 @@ public class TransactionRunnerTest {
               TimeUnit.SECONDS);
       String transactionId2 = response.getTransactionId();
       assertFalse(transactionId2.isEmpty());
-      response =
-          client.sendSync(
-              Request.newBuilder().setType(Type.COMMIT).setTransactionId(transactionId2).build(),
-              5,
-              TimeUnit.SECONDS);
       assertEquals(200, response.getStatus());
       response =
           client.sendSync(
               Request.newBuilder()
-                  .setType(Type.WRITE)
+                  .setType(Type.COMMIT)
                   .setTransactionId(transactionId1)
                   .setWritePayload(
                       WritePayload.newBuilder()
                           .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(50.0))
                           .addKeyValue(KeyValue.newBuilder().setKey("bob").setValue(100.0)))
                   .build(),
-              5,
-              TimeUnit.SECONDS);
-      assertNotNull(response);
-      response =
-          client.sendSync(
-              Request.newBuilder().setType(Type.COMMIT).setTransactionId(transactionId1).build(),
               5,
               TimeUnit.SECONDS);
       assertEquals(412, response.getStatus());
@@ -248,7 +231,7 @@ public class TransactionRunnerTest {
 
   @Test
   @Timeout(value = 5, unit = TimeUnit.MINUTES)
-  @Disabled
+  // @Disabled
   void testTransactionsConsistencyFlink() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs(
@@ -269,7 +252,6 @@ public class TransactionRunnerTest {
 
     Pipeline p = Pipeline.create(opts);
     MemoryDatabaseAccessor accessor = new MemoryDatabaseAccessor();
-    // accessor.set("client0", new Value(100.0, 1L));
     int clients = 1000;
     int parallelism = 25;
     TransactionRunner runner = createRunner(accessor);
@@ -318,23 +300,16 @@ public class TransactionRunnerTest {
                 String transactionId = response.getTransactionId();
                 double nextFrom = current.get(from) - amount;
                 double nextTo = current.get(to) + amount;
-                Future<ServerAck> ack =
-                    client.sendRequestAsync(
+                response =
+                    client.sendSync(
                         Request.newBuilder()
-                            .setType(Type.WRITE)
+                            .setType(Type.COMMIT)
                             .setTransactionId(transactionId)
                             .setWritePayload(
                                 WritePayload.newBuilder()
                                     .addKeyValue(
                                         KeyValue.newBuilder().setKey(from).setValue(nextFrom))
                                     .addKeyValue(KeyValue.newBuilder().setKey(to).setValue(nextTo)))
-                            .build());
-                assertEquals(200, ack.get().getStatus());
-                response =
-                    client.sendSync(
-                        Request.newBuilder()
-                            .setType(Type.COMMIT)
-                            .setTransactionId(transactionId)
                             .build(),
                         20,
                         TimeUnit.SECONDS);

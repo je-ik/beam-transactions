@@ -15,18 +15,13 @@
  */
 package cz.datadriven.beam.transaction;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server.Request;
-import cz.datadriven.beam.transaction.proto.Server.ServerAck;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.beam.sdk.Pipeline;
@@ -77,12 +72,8 @@ public class GrpcRequestReadTest {
               try {
                 TimeUnit.SECONDS.sleep(3);
                 try (TransactionClient client = TransactionClient.of("localhost", 5222)) {
-                  List<Future<ServerAck>> acks = new ArrayList<>();
                   for (int i = 0; i < numRequests; i++) {
-                    acks.add(client.sendRequestAsync(Request.getDefaultInstance()));
-                  }
-                  for (Future<ServerAck> f : acks) {
-                    assertEquals(200, f.get().getStatus());
+                    client.sendRequestAsync(Request.getDefaultInstance());
                   }
                   return true;
                 }

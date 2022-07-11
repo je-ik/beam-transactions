@@ -202,11 +202,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   public ProcessContinuation process(
       RestrictionTracker<String, Void> tracker,
       OutputReceiver<Internal> output,
-      ManualWatermarkEstimator<Instant> estimator,
-      BundleFinalizer bundleFinalizer) {
-
-    bundleFinalizer.afterBundleCommit(
-        Instant.now().plus(Duration.standardSeconds(10)), this::confirmGrpcRequests);
+      ManualWatermarkEstimator<Instant> estimator) {
 
     if (tracker.tryClaim(null)) {
       try {
@@ -239,15 +235,6 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
     return ProcessContinuation.stop();
   }
 
-  private void confirmGrpcRequests() {
-    claimedRequests.forEach(
-        kv ->
-            kv.getValue()
-                .onNext(
-                    ServerAck.newBuilder().setUid(kv.getKey().getUid()).setStatus(200).build()));
-    claimedRequests.clear();
-  }
-
   private Internal toInternal(Request request) {
     Builder builder =
         Internal.newBuilder().setRequest(request).setTransactionId(request.getTransactionId());
@@ -255,7 +242,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       for (String key : request.getReadPayload().getKeyList()) {
         builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
       }
-    } else if (request.getType().equals(Type.WRITE)) {
+    } else if (request.getType().equals(Type.COMMIT)) {
       for (KeyValue kv : request.getWritePayload().getKeyValueList()) {
         builder.addKeyValue(
             Internal.KeyValue.newBuilder().setKey(kv.getKey()).setValue(kv.getValue()));

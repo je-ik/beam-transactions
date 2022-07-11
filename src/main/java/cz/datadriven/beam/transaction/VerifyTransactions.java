@@ -112,9 +112,15 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     final TimerSpec sortTimerSpec = TimerSpecs.timer(TimeDomain.EVENT_TIME);
 
     private final long cleanupIntervalMs;
+    private long lastCleanupStamp;
 
     public VerifyTransactionsFn(long cleanupIntervalMs) {
       this.cleanupIntervalMs = cleanupIntervalMs;
+    }
+
+    @Setup
+    public void setup() {
+      lastCleanupStamp = System.currentTimeMillis();
     }
 
     @ProcessElement
@@ -174,11 +180,15 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
           .map(TimestampedValue::getValue)
           .forEachOrdered(
               list -> processOrderedElement(list, context.timestamp(), lastWriteSeqId, output));
-      long cleanupStamp = context.fireTimestamp().getMillis() - cleanupIntervalMs;
-      for (Map.Entry<String, KV<Long, Long>> e : lastWriteSeqId.entries().read()) {
-        if (e.getValue().getValue() < cleanupStamp) {
-          lastWriteSeqId.remove(e.getKey());
+      long now = context.fireTimestamp().getMillis();
+      if (lastCleanupStamp < now - cleanupIntervalMs) {
+        long cleanupStamp = context.fireTimestamp().getMillis() - cleanupIntervalMs;
+        for (Map.Entry<String, KV<Long, Long>> e : lastWriteSeqId.entries().read()) {
+          if (e.getValue().getValue() < cleanupStamp) {
+            lastWriteSeqId.remove(e.getKey());
+          }
         }
+        lastCleanupStamp = now;
       }
     }
 
@@ -193,10 +203,6 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
       if (commit != null) {
         if (verifyNoConflict(actions, commit.getSeqId(), timestamp, lastWriteSeqId)) {
           flushWrites(actions, commit.getSeqId(), timestamp, lastWriteSeqId);
-          actions
-              .stream()
-              .filter(a -> a.getRequest().getType().equals(Type.WRITE))
-              .forEach(output::output);
           output.output(commit.toBuilder().setStatus(200).build());
         } else {
           output.output(commit.toBuilder().setStatus(412).build());
@@ -212,7 +218,7 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
 
       actions
           .stream()
-          .filter(a -> a.getRequest().getType().equals(Type.WRITE))
+          .filter(a -> a.getRequest().getType().equals(Type.COMMIT))
           .flatMap(a -> a.getKeyValueList().stream())
           .distinct()
           .forEach(kv -> lastWriteSeqId.put(kv.getKey(), KV.of(seqId, timestamp.getMillis())));
