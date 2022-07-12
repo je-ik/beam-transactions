@@ -207,6 +207,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
     if (tracker.tryClaim(null)) {
       try {
         @Nullable KV<Request, StreamObserver<ServerAck>> polled;
+        long startPolling = System.currentTimeMillis();
         do {
           polled = OUTPUT_QUEUE.poll(10, TimeUnit.MILLISECONDS);
           if (log.isDebugEnabled()) {
@@ -225,7 +226,11 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
           } else if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
             return ProcessContinuation.stop();
           }
-        } while (polled != null && tracker.tryClaim(null));
+          if (!tracker.tryClaim(null)) {
+            return ProcessContinuation.stop();
+          }
+        } while (polled != null && System.currentTimeMillis() - startPolling < 10L * readDelay);
+
         return ProcessContinuation.resume().withResumeDelay(Duration.millis(readDelay));
       } catch (InterruptedException e) {
         log.info("Interrupted while processing requests.", e);

@@ -55,7 +55,7 @@ public interface TransactionRunnerOptions extends PipelineOptions {
 
   void setCassandraTable(String table);
 
-  @Default.Integer(50)
+  @Default.Integer(10)
   int getGrpcReadDelay();
 
   void setGrpcReadDelay(int delay);
@@ -65,7 +65,7 @@ public interface TransactionRunnerOptions extends PipelineOptions {
 
   void setNumInitialSplits(int splits);
 
-  @Default.Integer(30)
+  @Default.Integer(3600)
   int getTransactionCleanupIntervalSeconds();
 
   void setTransactionCleanupIntervalSeconds(int interval);

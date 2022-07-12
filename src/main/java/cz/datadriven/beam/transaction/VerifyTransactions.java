@@ -236,6 +236,17 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
           .flatMap(a -> a.getKeyValueList().stream().map(KeyValue::getKey))
           .distinct()
           .forEach(k -> lastWriteSeqId.get(k).readLater());
+
+      if (actions
+          .stream()
+          .flatMap(i -> i.getKeyValueList().stream())
+          .noneMatch(kv -> kv.getSeqId() != 0)) {
+        // if we are missing a read information, we reject the transaction
+        // this is due to requiring checkpoint only for COMMIT requests, we can therefore miss some
+        // reads, which would lead to inconsistencies
+        return false;
+      }
+
       return actions
           .stream()
           .allMatch(a -> isValidRead(a, commitSeqId, actionStamp, lastWriteSeqId));

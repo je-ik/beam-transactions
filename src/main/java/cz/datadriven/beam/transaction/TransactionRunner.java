@@ -27,14 +27,19 @@ import javax.annotation.Nullable;
 import org.apache.beam.runners.flink.FlinkPipelineOptions;
 import org.apache.beam.runners.flink.FlinkStateBackendFactory;
 import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.Filter;
 import org.apache.beam.sdk.transforms.Flatten;
+import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
 import org.apache.flink.runtime.state.StateBackend;
@@ -62,6 +67,32 @@ public class TransactionRunner {
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
+    }
+  }
+
+  private static class BufferUntilCheckpoint<T> extends PTransform<PCollection<T>, PCollection<T>> {
+
+    static <T> BufferUntilCheckpoint<T> of() {
+      return new BufferUntilCheckpoint<>();
+    }
+
+    private static class BufferUntilCheckpointFn<T> extends DoFn<T, T> {
+      @RequiresStableInput
+      @ProcessElement
+      public void process(@Element T in, OutputReceiver<T> out) {
+        out.output(in);
+        ;
+      }
+    }
+
+    @Override
+    public PCollection<T> expand(PCollection<T> input) {
+      Coder<T> inputCoder = input.getCoder();
+      TypeDescriptor<T> inputTypeDescriptor = input.getTypeDescriptor();
+      return input
+          .apply(ParDo.of(new BufferUntilCheckpointFn<>()))
+          .setTypeDescriptor(inputTypeDescriptor)
+          .setCoder(inputCoder);
     }
   }
 
@@ -111,30 +142,29 @@ public class TransactionRunner {
             .apply(Filter.by(r -> r.getRequest().hasReadPayload()))
             .apply("databaseRead", DatabaseRead.of(accessor));
 
+    writeResponses("writeReadResponses", false, readResponses);
+
     PCollection<Internal> verified =
         PCollectionList.of(readResponses)
             .and(requests.apply(Filter.by(r -> !r.getRequest().hasReadPayload())))
             .apply("flattenReadsAndWrites", Flatten.pCollections())
-            .apply("verify", VerifyTransactions.of());
+            .apply("verify", VerifyTransactions.of())
+            .apply("commitOutputs", BufferUntilCheckpoint.of());
 
     verified
         .apply(Filter.by(i -> i.getStatus() == 200))
         .apply("databaseWrite", DatabaseWrite.of(accessor));
 
-    PCollection<Internal> responses =
-        PCollectionList.of(readResponses)
-            .and(verified)
-            .apply("flattenResponses", Flatten.pCollections());
-    writeResponses("writeCommitResponses", responses);
+    writeResponses("writeCommitResponses", true, verified);
   }
 
-  private void writeResponses(String name, PCollection<Internal> responses) {
+  private void writeResponses(String name, boolean stable, PCollection<Internal> responses) {
     responses
         .apply(
             WithKeys.<String, Internal>of(
                     r -> r.getRequest().getResponseHost() + ":" + r.getRequest().getResponsePort())
                 .withKeyType(TypeDescriptors.strings()))
-        .apply(name, GrpcResponseWrite.of());
+        .apply(name, GrpcResponseWrite.of(stable));
   }
 
   @VisibleForTesting

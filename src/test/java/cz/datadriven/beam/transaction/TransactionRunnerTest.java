@@ -58,6 +58,7 @@ import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -190,7 +191,19 @@ public class TransactionRunnerTest {
       response =
           client.sendSync(
               Request.newBuilder()
+                  .setType(Type.READ)
+                  .setReadPayload(ReadPayload.newBuilder().addKey("dummy"))
+                  .build(),
+              5,
+              TimeUnit.SECONDS);
+      String transactionId2 = response.getTransactionId();
+      assertFalse(transactionId2.isEmpty());
+      assertNotNull(response);
+      response =
+          client.sendSync(
+              Request.newBuilder()
                   .setType(Type.COMMIT)
+                  .setTransactionId(transactionId2)
                   .setWritePayload(
                       WritePayload.newBuilder()
                           .addKeyValue(KeyValue.newBuilder().setKey("alice").setValue(75.0))
@@ -198,8 +211,6 @@ public class TransactionRunnerTest {
                   .build(),
               5,
               TimeUnit.SECONDS);
-      String transactionId2 = response.getTransactionId();
-      assertFalse(transactionId2.isEmpty());
       assertEquals(200, response.getStatus());
       response =
           client.sendSync(
@@ -231,7 +242,7 @@ public class TransactionRunnerTest {
 
   @Test
   @Timeout(value = 5, unit = TimeUnit.MINUTES)
-  // @Disabled
+  @Disabled
   void testTransactionsConsistencyFlink() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs(

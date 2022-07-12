@@ -104,7 +104,7 @@ public class TransactionClient implements Closeable {
   private final Map<String, CompletableFuture<Response>> responseMap = new ConcurrentHashMap<>();
   private final Server server;
 
-  private StreamObserver<Request> requestObserver;
+  private volatile StreamObserver<Request> requestObserver;
 
   private TransactionClient(String host, int port, String responseHostname) throws IOException {
     this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();

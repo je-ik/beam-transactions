@@ -15,7 +15,6 @@
  */
 package cz.datadriven.beam.transaction;
 
-import com.google.common.base.MoreObjects;
 import cz.datadriven.beam.transaction.DatabaseAccessor.Value;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue;
@@ -74,8 +73,8 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
     private final DatabaseAccessor accessor;
 
-    @StateId("lastWritten")
-    private final StateSpec<ValueState<Long>> lastWrittenSpec = StateSpecs.value();
+    @StateId("dummy")
+    private final StateSpec<ValueState<Long>> dummy = StateSpecs.value();
 
     public WriteFn(DatabaseAccessor accessor) {
       this.accessor = accessor;
@@ -92,17 +91,9 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
     }
 
     @ProcessElement
-    public void process(
-        @Element KV<String, KeyValue> element,
-        @Timestamp Instant ts,
-        @StateId("lastWritten") ValueState<Long> lastWritten) {
-
-      long written = MoreObjects.firstNonNull(lastWritten.read(), 0L);
+    public void process(@Element KV<String, KeyValue> element, @Timestamp Instant ts) {
       KeyValue value = Objects.requireNonNull(element.getValue());
-      if (written < value.getSeqId()) {
-        accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId(), ts.getMillis()));
-        lastWritten.write(value.getSeqId());
-      }
+      accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId(), ts.getMillis()));
     }
   }
 }

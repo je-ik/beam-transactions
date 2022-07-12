@@ -45,7 +45,11 @@ import org.apache.beam.sdk.values.PDone;
 public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Internal>>, PDone> {
 
   public static GrpcResponseWrite of() {
-    return new GrpcResponseWrite();
+    return of(true);
+  }
+
+  public static GrpcResponseWrite of(boolean stable) {
+    return new GrpcResponseWrite(stable);
   }
 
   @Value
@@ -60,14 +64,13 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     private final Map<String, ChannelWithObserver> openChannels = new ConcurrentHashMap<>();
 
     @StateId("dummy")
-    private final StateSpec<ValueState<Boolean>> dummySpec = StateSpecs.value();
+    final StateSpec<ValueState<Boolean>> dummySpec = StateSpecs.value();
 
     @Teardown
     public void tearDown() {
       openChannels.values().forEach(v -> v.getChannel().shutdown());
     }
 
-    @RequiresStableInput
     @ProcessElement
     public void process(@Element KV<String, Internal> element) {
       if (element.getValue().getRequest().getRequestUid().isEmpty()) {
@@ -142,9 +145,28 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     }
   }
 
+  private static class StableGrpcResponseWriteFn extends GrpcResponseWriteFn {
+
+    @Teardown
+    public void tearDown() {
+      super.tearDown();
+    }
+
+    @ProcessElement
+    public void process(@Element KV<String, Internal> element) {
+      super.process(element);
+    }
+  }
+
+  private final boolean stable;
+
+  public GrpcResponseWrite(boolean stable) {
+    this.stable = stable;
+  }
+
   @Override
   public PDone expand(PCollection<KV<String, Internal>> input) {
-    input.apply(ParDo.of(new GrpcResponseWriteFn()));
+    input.apply(ParDo.of(stable ? new StableGrpcResponseWriteFn() : new GrpcResponseWriteFn()));
     return PDone.in(input.getPipeline());
   }
 }
