@@ -16,16 +16,12 @@
 package cz.datadriven.beam.transaction;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.MoreObjects;
 import com.google.common.collect.Lists;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.state.BagState;
@@ -36,15 +32,12 @@ import org.apache.beam.sdk.state.TimeDomain;
 import org.apache.beam.sdk.state.Timer;
 import org.apache.beam.sdk.state.TimerSpec;
 import org.apache.beam.sdk.state.TimerSpecs;
-import org.apache.beam.sdk.state.ValueState;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.WithKeys;
-import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.TimestampedValue;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.joda.time.Instant;
@@ -101,16 +94,6 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     @StateId("seqId")
     final StateSpec<MapState<String, KV<Long, Long>>> lastWriteSeqIdSpec = StateSpecs.map();
 
-    // FIXME: SortedMapState would be mode efficient here, but has limited support
-    @StateId("sortBuffer")
-    final StateSpec<BagState<TimestampedValue<List<Internal>>>> sortBufferSpec = StateSpecs.bag();
-
-    @StateId("minBufferStamp")
-    final StateSpec<ValueState<Instant>> minBufferStampSpec = StateSpecs.value();
-
-    @TimerId("sortTimer")
-    final TimerSpec sortTimerSpec = TimerSpecs.timer(TimeDomain.EVENT_TIME);
-
     private final long cleanupIntervalMs;
     private long lastCleanupStamp;
 
@@ -126,79 +109,11 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     @ProcessElement
     public void process(
         @Element KV<Void, List<Internal>> element,
-        @Timestamp Instant ts,
-        @StateId("sortBuffer") BagState<TimestampedValue<List<Internal>>> sortBuffer,
-        @StateId("minBufferStamp") ValueState<Instant> minBufferStamp,
-        @TimerId("sortTimer") Timer sortTimer) {
-
-      sortBuffer.add(TimestampedValue.of(element.getValue(), ts));
-      Instant currentMinStamp =
-          MoreObjects.firstNonNull(minBufferStamp.read(), BoundedWindow.TIMESTAMP_MAX_VALUE);
-      if (currentMinStamp.isAfter(ts)) {
-        sortTimer.withOutputTimestamp(ts).set(ts.plus(1));
-        minBufferStamp.write(ts);
-      }
-    }
-
-    @OnTimer("sortTimer")
-    public void onSortTimer(
-        OnTimerContext context,
+        @Timestamp Instant timestamp,
         @StateId("seqId") MapState<String, KV<Long, Long>> lastWriteSeqId,
-        @StateId("sortBuffer") BagState<TimestampedValue<List<Internal>>> sortBuffer,
-        @StateId("minBufferStamp") ValueState<Instant> minBufferStamp,
-        @TimerId("sortTimer") Timer sortTimer,
         OutputReceiver<Internal> output) {
 
-      Instant ts = context.fireTimestamp();
-      final List<TimestampedValue<List<Internal>>> toFlush = new ArrayList<>();
-      final List<TimestampedValue<List<Internal>>> toKeep = new ArrayList<>();
-      Instant newMinStamp = BoundedWindow.TIMESTAMP_MAX_VALUE;
-      for (TimestampedValue<List<Internal>> element : sortBuffer.read()) {
-        if (ts.isAfter(element.getTimestamp())) {
-          toFlush.add(element);
-        } else {
-          if (newMinStamp.isAfter(element.getTimestamp())) {
-            newMinStamp = element.getTimestamp();
-          }
-          toKeep.add(element);
-        }
-      }
-      if (newMinStamp.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
-        sortTimer.withOutputTimestamp(newMinStamp).set(newMinStamp.plus(1));
-        minBufferStamp.write(newMinStamp);
-      } else {
-        minBufferStamp.clear();
-      }
-      sortBuffer.clear();
-      toKeep.forEach(sortBuffer::add);
-      toFlush
-          .stream()
-          .sorted(
-              Comparator.<TimestampedValue<List<Internal>>, Instant>comparing(
-                      TimestampedValue::getTimestamp)
-                  .thenComparing(el -> el.getValue().get(0).getSeqId()))
-          .map(TimestampedValue::getValue)
-          .forEachOrdered(
-              list -> processOrderedElement(list, context.timestamp(), lastWriteSeqId, output));
-      long now = context.fireTimestamp().getMillis();
-      if (lastCleanupStamp < now - cleanupIntervalMs) {
-        long cleanupStamp = context.fireTimestamp().getMillis() - cleanupIntervalMs;
-        for (Map.Entry<String, KV<Long, Long>> e : lastWriteSeqId.entries().read()) {
-          if (e.getValue().getValue() < cleanupStamp) {
-            lastWriteSeqId.remove(e.getKey());
-          }
-        }
-        lastCleanupStamp = now;
-      }
-    }
-
-    private void processOrderedElement(
-        List<Internal> element,
-        Instant timestamp,
-        MapState<String, KV<Long, Long>> lastWriteSeqId,
-        OutputReceiver<Internal> output) {
-
-      List<Internal> actions = Objects.requireNonNull(element);
+      List<Internal> actions = Objects.requireNonNull(element.getValue());
       Internal commit = getCommitIfPresent(actions);
       if (commit != null) {
         if (verifyNoConflict(actions, commit.getSeqId(), timestamp, lastWriteSeqId)) {
