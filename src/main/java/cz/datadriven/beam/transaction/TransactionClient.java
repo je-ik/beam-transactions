@@ -15,6 +15,7 @@
  */
 package cz.datadriven.beam.transaction;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.TextFormat;
 import cz.datadriven.beam.transaction.proto.Server.ClientAck;
 import cz.datadriven.beam.transaction.proto.Server.Request;
@@ -31,6 +32,7 @@ import io.grpc.stub.StreamObserver;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -38,7 +40,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -48,10 +49,18 @@ import lombok.extern.slf4j.Slf4j;
 public class TransactionClient implements Closeable {
 
   public static TransactionClient of(String host, int port) {
+    try {
+      return of(host, port, InetAddress.getLocalHost().getHostName());
+    } catch (UnknownHostException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static TransactionClient of(String host, int port, String responseHostname) {
     Exception caught = null;
     for (int i = 0; i < 3; i++) {
       try {
-        return new TransactionClient(host, port);
+        return new TransactionClient(host, port, responseHostname);
       } catch (IOException ex) {
         if (caught == null) {
           caught = ex;
@@ -87,25 +96,20 @@ public class TransactionClient implements Closeable {
     }
   }
 
-  private final String host;
-  private final int port;
   private final ManagedChannel channel;
   private final TransactionServerStub stub;
   private final AtomicLong reqId = new AtomicLong();
-  private final Map<Long, CompletableFuture<ServerAck>> uncompleted = new ConcurrentHashMap<>();
-  private final String localHost;
+  private final String responseHostname;
   private final int localPort = new Random().nextInt(60000) + 1024;
   private final Map<String, CompletableFuture<Response>> responseMap = new ConcurrentHashMap<>();
   private final Server server;
 
-  private StreamObserver<Request> requestObserver;
+  private volatile StreamObserver<Request> requestObserver;
 
-  private TransactionClient(String host, int port) throws IOException {
-    this.host = host;
-    this.port = port;
+  private TransactionClient(String host, int port, String responseHostname) throws IOException {
     this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
     this.stub = TransactionServerGrpc.newStub(channel).withWaitForReady();
-    this.localHost = InetAddress.getLocalHost().getHostName();
+    this.responseHostname = responseHostname;
     this.server =
         ServerBuilder.forPort(localPort).addService(new TransactionClientService()).build();
     this.server.start();
@@ -129,34 +133,26 @@ public class TransactionClient implements Closeable {
     CompletableFuture<Response> responseFuture = new CompletableFuture<>();
     responseMap.put(requestUid, responseFuture);
     try {
-      Future<ServerAck> ack =
-          sendRequestAsync(
-              request
-                  .toBuilder()
-                  .setRequestUid(requestUid)
-                  .setResponseHost(localHost)
-                  .setResponsePort(localPort)
-                  .build());
-      ServerAck serverAck = ack.get();
-      if (serverAck.getStatus() != 200) {
-        throw new IllegalStateException(
-            "Received invalid server ack " + TextFormat.shortDebugString(serverAck));
-      }
+      sendRequestAsync(
+          request
+              .toBuilder()
+              .setRequestUid(requestUid)
+              .setResponseHost(responseHostname)
+              .setResponsePort(localPort)
+              .build());
       return responseFuture.get(timeout, unit);
     } finally {
       responseMap.remove(requestUid);
     }
   }
 
-  public Future<ServerAck> sendRequestAsync(Request request) {
-    CompletableFuture<ServerAck> ret = new CompletableFuture<>();
+  @VisibleForTesting
+  void sendRequestAsync(Request request) {
     long req = reqId.getAndIncrement();
-    uncompleted.put(req, ret);
     Request toSend = request.toBuilder().setUid(req).build();
     synchronized (this) {
       requestObserver().onNext(toSend);
     }
-    return ret;
   }
 
   private StreamObserver<Request> requestObserver() {
@@ -165,13 +161,7 @@ public class TransactionClient implements Closeable {
           stub.stream(
               new StreamObserver<>() {
                 @Override
-                public void onNext(ServerAck serverAck) {
-                  if (log.isDebugEnabled()) {
-                    log.info("Received response {}", TextFormat.shortDebugString(serverAck));
-                  }
-                  Optional.ofNullable(uncompleted.remove(serverAck.getUid()))
-                      .ifPresent(f -> f.complete(serverAck));
-                }
+                public void onNext(ServerAck serverAck) {}
 
                 @Override
                 public void onError(Throwable throwable) {

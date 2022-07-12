@@ -77,7 +77,10 @@ public class DatabaseRead extends PTransform<PCollection<Internal>, PCollection<
               .collect(
                   Collectors.toMap(
                       KV::getKey,
-                      kv -> kv.getValue() != null ? kv.getValue() : new Value(0.0, -1L)));
+                      kv ->
+                          kv.getValue() != null
+                              ? kv.getValue()
+                              : new Value(0.0, -1L, Long.MIN_VALUE)));
       for (Internal r : requests) {
         Internal.Builder builder = r.toBuilder().clearKeyValue();
         List<String> query = Objects.requireNonNull(grouped.get(r.getSeqId()));

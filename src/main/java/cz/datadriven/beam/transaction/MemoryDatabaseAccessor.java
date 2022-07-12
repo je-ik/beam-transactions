@@ -48,7 +48,8 @@ public class MemoryDatabaseAccessor implements DatabaseAccessor {
         .compute(
             key,
             (k, v) -> {
-              Preconditions.checkState(v == null || v.getSeqId() < value.getSeqId());
+              Preconditions.checkState(
+                  v == null || v.getSeqId() < value.getSeqId() && v.getStamp() < value.getStamp());
               return value;
             });
   }

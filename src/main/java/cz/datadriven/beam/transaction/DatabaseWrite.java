@@ -15,7 +15,6 @@
  */
 package cz.datadriven.beam.transaction;
 
-import com.google.common.base.MoreObjects;
 import cz.datadriven.beam.transaction.DatabaseAccessor.Value;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue;
@@ -35,6 +34,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.joda.time.Instant;
 
 public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
@@ -51,7 +51,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
   @Override
   public PDone expand(PCollection<Internal> input) {
     input
-        .apply(Filter.by(a -> a.getRequest().getType().equals(Type.WRITE)))
+        .apply(Filter.by(a -> a.getRequest().getType().equals(Type.COMMIT)))
         .apply(
             FlatMapElements.into(
                     TypeDescriptors.kvs(
@@ -73,8 +73,8 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
 
     private final DatabaseAccessor accessor;
 
-    @StateId("lastWritten")
-    private final StateSpec<ValueState<Long>> lastWrittenSpec = StateSpecs.value();
+    @StateId("dummy")
+    private final StateSpec<ValueState<Long>> dummy = StateSpecs.value();
 
     public WriteFn(DatabaseAccessor accessor) {
       this.accessor = accessor;
@@ -90,18 +90,10 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
       accessor.close();
     }
 
-    @RequiresStableInput
     @ProcessElement
-    public void process(
-        @Element KV<String, KeyValue> element,
-        @StateId("lastWritten") ValueState<Long> lastWritten) {
-
-      long written = MoreObjects.firstNonNull(lastWritten.read(), 0L);
+    public void process(@Element KV<String, KeyValue> element, @Timestamp Instant ts) {
       KeyValue value = Objects.requireNonNull(element.getValue());
-      if (written < value.getSeqId()) {
-        accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId()));
-        lastWritten.write(value.getSeqId());
-      }
+      accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId(), ts.getMillis()));
     }
   }
 }

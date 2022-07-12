@@ -20,10 +20,8 @@ message Request {
 
   enum Type {
     UNKNOWN = 0;
-    BEGIN = 1;
-    READ = 2;
-    WRITE = 3;
-    COMMIT = 4;
+    READ = 1;
+    COMMIT = 2;
   }
 
   int64 uid = 1;
@@ -31,7 +29,7 @@ message Request {
   string responseHost = 3;
   int32 responsePort = 4;
 
-  // might be missing when type is BEGIN
+  // might be missing, will be generated
   string transactionId = 5;
 
   Type type = 6;
@@ -49,7 +47,6 @@ message Response {
   // 412 = Precondition failed = transaction was rejected (response to COMMIT)
   uint32 status = 3;
 
-  // response to BEGIN request
   string transactionId = 4;
 
   // response to READ request
@@ -58,13 +55,9 @@ message Response {
 }
 
 message ServerAck {
-  uint64 uid = 1;
-  uint32 status = 2;
 }
 
 message ClientAck {
-  uint64 uid = 1;
-  uint32 status = 2;
 }
 
 service TransactionServer {

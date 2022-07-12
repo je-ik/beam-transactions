@@ -45,7 +45,11 @@ import org.apache.beam.sdk.values.PDone;
 public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Internal>>, PDone> {
 
   public static GrpcResponseWrite of() {
-    return new GrpcResponseWrite();
+    return of(true);
+  }
+
+  public static GrpcResponseWrite of(boolean stable) {
+    return new GrpcResponseWrite(stable);
   }
 
   @Value
@@ -67,11 +71,10 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
       openChannels.values().forEach(v -> v.getChannel().shutdown());
     }
 
-    @RequiresStableInput
     @ProcessElement
     public void process(@Element KV<String, Internal> element) {
       if (element.getValue().getRequest().getRequestUid().isEmpty()) {
-        // skip requests that so not wait for response
+        // skip requests that do not wait for response
         return;
       }
       ChannelWithObserver channelWithObserver =
@@ -131,9 +134,7 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
 
             @Override
             public void onError(Throwable throwable) {
-              // FIXME
               openChannels.remove(key).getChannel().shutdown();
-              throw new RuntimeException(throwable);
             }
 
             @Override
@@ -144,9 +145,28 @@ public class GrpcResponseWrite extends PTransform<PCollection<KV<String, Interna
     }
   }
 
+  private static class StableGrpcResponseWriteFn extends GrpcResponseWriteFn {
+
+    @Teardown
+    public void tearDown() {
+      super.tearDown();
+    }
+
+    @ProcessElement
+    public void process(@Element KV<String, Internal> element) {
+      super.process(element);
+    }
+  }
+
+  private final boolean stable;
+
+  public GrpcResponseWrite(boolean stable) {
+    this.stable = stable;
+  }
+
   @Override
   public PDone expand(PCollection<KV<String, Internal>> input) {
-    input.apply(ParDo.of(new GrpcResponseWriteFn()));
+    input.apply(ParDo.of(stable ? new StableGrpcResponseWriteFn() : new GrpcResponseWriteFn()));
     return PDone.in(input.getPipeline());
   }
 }

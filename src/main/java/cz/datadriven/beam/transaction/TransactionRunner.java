@@ -21,21 +21,28 @@ import com.google.protobuf.GeneratedMessageV3;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.Server;
 import cz.datadriven.beam.transaction.proto.Server.Request;
-import cz.datadriven.beam.transaction.proto.Server.Request.Type;
+import java.io.IOException;
 import java.util.Set;
 import javax.annotation.Nullable;
+import org.apache.beam.runners.flink.FlinkPipelineOptions;
+import org.apache.beam.runners.flink.FlinkStateBackendFactory;
 import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.Filter;
 import org.apache.beam.sdk.transforms.Flatten;
-import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SerializableFunction;
-import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
+import org.apache.flink.runtime.state.StateBackend;
 import org.joda.time.Instant;
 
 /**
@@ -51,6 +58,44 @@ public class TransactionRunner {
     app.run();
   }
 
+  public static class IncrementalStateBackendFactory implements FlinkStateBackendFactory {
+
+    @Override
+    public StateBackend createStateBackend(FlinkPipelineOptions options) {
+      try {
+        return new RocksDBStateBackend(options.getStateBackendStoragePath(), true);
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+
+  private static class BufferUntilCheckpoint<T> extends PTransform<PCollection<T>, PCollection<T>> {
+
+    static <T> BufferUntilCheckpoint<T> of() {
+      return new BufferUntilCheckpoint<>();
+    }
+
+    private static class BufferUntilCheckpointFn<T> extends DoFn<T, T> {
+      @RequiresStableInput
+      @ProcessElement
+      public void process(@Element T in, OutputReceiver<T> out) {
+        out.output(in);
+        ;
+      }
+    }
+
+    @Override
+    public PCollection<T> expand(PCollection<T> input) {
+      Coder<T> inputCoder = input.getCoder();
+      TypeDescriptor<T> inputTypeDescriptor = input.getTypeDescriptor();
+      return input
+          .apply(ParDo.of(new BufferUntilCheckpointFn<>()))
+          .setTypeDescriptor(inputTypeDescriptor)
+          .setCoder(inputCoder);
+    }
+  }
+
   private final PipelineOptions opts;
 
   @VisibleForTesting
@@ -60,6 +105,15 @@ public class TransactionRunner {
 
   public TransactionRunner(String[] args) {
     opts = PipelineOptionsFactory.fromArgs(args).create();
+    setupStateBackend(opts);
+  }
+
+  private void setupStateBackend(PipelineOptions opts) {
+    TransactionRunnerOptions runnerOpts = opts.as(TransactionRunnerOptions.class);
+    if (runnerOpts.getUseIncrementalCheckpoints()) {
+      FlinkPipelineOptions flinkOpts = opts.as(FlinkPipelineOptions.class);
+      flinkOpts.setStateBackendFactory(IncrementalStateBackendFactory.class);
+    }
   }
 
   void run() {
@@ -88,45 +142,38 @@ public class TransactionRunner {
             .apply(Filter.by(r -> r.getRequest().hasReadPayload()))
             .apply("databaseRead", DatabaseRead.of(accessor));
 
-    PCollection<Internal> resolved =
+    writeResponses("writeReadResponses", false, readResponses);
+
+    PCollection<Internal> verified =
         PCollectionList.of(readResponses)
             .and(requests.apply(Filter.by(r -> !r.getRequest().hasReadPayload())))
-            .apply(Flatten.pCollections());
+            .apply("flattenReadsAndWrites", Flatten.pCollections())
+            .apply("verify", VerifyTransactions.of())
+            .apply("commitOutputs", BufferUntilCheckpoint.of());
 
-    PCollection<Internal> resolvedResponses =
-        resolved.apply(
-            Filter.by(
-                r ->
-                    r.getRequest().getType().equals(Type.READ)
-                        || r.getRequest().getType().equals(Type.WRITE)));
-
-    PCollection<Internal> verified = resolved.apply("verify", VerifyTransactions.of());
     verified
-        .apply(Filter.by(i -> i.getRequest().getType().equals(Type.WRITE)))
+        .apply(Filter.by(i -> i.getStatus() == 200))
         .apply("databaseWrite", DatabaseWrite.of(accessor));
 
-    PCollection<Internal> responses =
-        PCollectionList.of(verified).and(resolvedResponses).apply(Flatten.pCollections());
+    writeResponses("writeCommitResponses", true, verified);
+  }
 
+  private void writeResponses(String name, boolean stable, PCollection<Internal> responses) {
     responses
         .apply(
-            MapElements.into(
-                    TypeDescriptors.kvs(
-                        TypeDescriptors.strings(), TypeDescriptor.of(Internal.class)))
-                .via(
-                    r ->
-                        KV.of(
-                            r.getRequest().getResponseHost()
-                                + ":"
-                                + r.getRequest().getResponsePort(),
-                            r)))
-        .apply("writeResponses", GrpcResponseWrite.of());
+            WithKeys.<String, Internal>of(
+                    r -> r.getRequest().getResponseHost() + ":" + r.getRequest().getResponsePort())
+                .withKeyType(TypeDescriptors.strings()))
+        .apply(name, GrpcResponseWrite.of(stable));
   }
 
   @VisibleForTesting
   DatabaseAccessor createAccessor(PipelineOptions opts) {
-    // FIXME
-    return new MemoryDatabaseAccessor();
+    TransactionRunnerOptions runnerOpts = opts.as(TransactionRunnerOptions.class);
+    return new CassandraDatabaseAccessor(
+        runnerOpts.getCassandraAuthority(),
+        runnerOpts.getCassandraKeyspace(),
+        runnerOpts.getCassandraTable());
   }
 
   @VisibleForTesting

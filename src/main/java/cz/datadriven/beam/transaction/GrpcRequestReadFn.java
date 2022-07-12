@@ -104,12 +104,15 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
     public boolean tryClaim(Void position) {
       if (SERVER == null) {
         synchronized (GrpcRequestReadFn.class) {
-          SERVER = newServer();
-          log.info("Running new server.");
-          try {
-            SERVER.start();
-          } catch (IOException e) {
-            throw new RuntimeException(e);
+          if (SERVER == null) {
+            SERVER = newServer();
+            log.info("Running new server.");
+            try {
+              SERVER.start();
+            } catch (IOException e) {
+              // FIXME
+              // throw new RuntimeException(e);
+            }
           }
         }
       }
@@ -137,6 +140,8 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   }
 
   @Getter private final int port;
+  private final int readDelay;
+  private final int initialSplits;
   private final SerializableFunction<Request, Instant> watermarkFn;
   private final List<KV<Request, StreamObserver<ServerAck>>> claimedRequests = new ArrayList<>();
 
@@ -144,12 +149,21 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       TransactionRunnerOptions runnerOpts, SerializableFunction<Request, Instant> watermarkFn) {
 
     this.port = runnerOpts.getRequestPort();
+    this.readDelay = runnerOpts.getGrpcReadDelay();
+    this.initialSplits = runnerOpts.getNumInitialSplits();
     this.watermarkFn = watermarkFn == null ? tmp -> Instant.now() : watermarkFn;
   }
 
   @GetInitialRestriction
   public String getInitialRestriction() {
     return UUID.randomUUID().toString();
+  }
+
+  @SplitRestriction
+  public void splitRestriction(OutputReceiver<String> output) {
+    for (int i = 0; i < initialSplits; i++) {
+      output.output(UUID.randomUUID().toString());
+    }
   }
 
   @GetRestrictionCoder
@@ -188,15 +202,12 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   public ProcessContinuation process(
       RestrictionTracker<String, Void> tracker,
       OutputReceiver<Internal> output,
-      ManualWatermarkEstimator<Instant> estimator,
-      BundleFinalizer bundleFinalizer) {
-
-    bundleFinalizer.afterBundleCommit(
-        Instant.now().plus(Duration.standardSeconds(10)), this::confirmGrpcRequests);
+      ManualWatermarkEstimator<Instant> estimator) {
 
     if (tracker.tryClaim(null)) {
       try {
         @Nullable KV<Request, StreamObserver<ServerAck>> polled;
+        long startPolling = System.currentTimeMillis();
         do {
           polled = OUTPUT_QUEUE.poll(10, TimeUnit.MILLISECONDS);
           if (log.isDebugEnabled()) {
@@ -215,23 +226,18 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
           } else if (!watermark.isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
             return ProcessContinuation.stop();
           }
-        } while (polled != null);
-        return ProcessContinuation.resume();
+          if (!tracker.tryClaim(null)) {
+            return ProcessContinuation.stop();
+          }
+        } while (polled != null && System.currentTimeMillis() - startPolling < 10L * readDelay);
+
+        return ProcessContinuation.resume().withResumeDelay(Duration.millis(readDelay));
       } catch (InterruptedException e) {
         log.info("Interrupted while processing requests.", e);
-        return ProcessContinuation.stop();
+        return ProcessContinuation.resume();
       }
     }
     return ProcessContinuation.stop();
-  }
-
-  private void confirmGrpcRequests() {
-    claimedRequests.forEach(
-        kv ->
-            kv.getValue()
-                .onNext(
-                    ServerAck.newBuilder().setUid(kv.getKey().getUid()).setStatus(200).build()));
-    claimedRequests.clear();
   }
 
   private Internal toInternal(Request request) {
@@ -241,7 +247,7 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
       for (String key : request.getReadPayload().getKeyList()) {
         builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
       }
-    } else if (request.getType().equals(Type.WRITE)) {
+    } else if (request.getType().equals(Type.COMMIT)) {
       for (KeyValue kv : request.getWritePayload().getKeyValueList()) {
         builder.addKeyValue(
             Internal.KeyValue.newBuilder().setKey(kv.getKey()).setValue(kv.getValue()));
