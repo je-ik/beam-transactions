@@ -46,7 +46,6 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            1L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
@@ -54,7 +53,6 @@ public class VerifyTransactionsTest {
     Internal write =
         asInternal(
             "t1",
-            1L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -91,17 +89,19 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
     Internal write =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -126,9 +126,9 @@ public class VerifyTransactionsTest {
                     .via(
                         a ->
                             String.format(
-                                "%s:%d:%d",
-                                a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200");
+                                "%s:%s:%d",
+                                a.getRequest().getType(), a.getTransactionId(), a.getStatus())));
+    PAssert.that(res).containsInAnyOrder("COMMIT:t1:200");
     p.run();
   }
 
@@ -137,27 +137,32 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
     Internal read2 =
         asInternal(
             "t2",
-            3L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
     Internal commit =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -169,7 +174,6 @@ public class VerifyTransactionsTest {
     Internal commit2 =
         asInternal(
             "t2",
-            3L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -191,20 +195,16 @@ public class VerifyTransactionsTest {
     p.run();
   }
 
-  private Internal asInternal(String transactionId, long seqId, Request request) {
-    return asInternal(transactionId, seqId, request, null);
+  private Internal asInternal(String transactionId, Request request) {
+    return asInternal(transactionId, request, null);
   }
 
   private Internal asInternal(
-      String transactionId,
-      long seqId,
-      Request request,
-      @Nullable List<Internal.KeyValue> keyValues) {
+      String transactionId, Request request, @Nullable List<Internal.KeyValue> keyValues) {
 
     return Internal.newBuilder()
         .addAllKeyValue(keyValues == null ? Collections.emptyList() : keyValues)
         .setRequest(request.toBuilder().setTransactionId(transactionId))
-        .setSeqId(seqId)
         .setTransactionId(transactionId)
         .build();
   }

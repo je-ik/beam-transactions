@@ -132,10 +132,7 @@ public class TransactionRunner {
 
     DatabaseAccessor accessor = createAccessor(opts);
     registerCoders(pipeline);
-    PCollection<Internal> requests =
-        pipeline
-            .apply("grpcRead", GrpcRequestRead.of(watermarkFn))
-            .apply("assignSeqId", TransactionSeqIdAssign.of());
+    PCollection<Internal> requests = pipeline.apply("grpcRead", GrpcRequestRead.of(watermarkFn));
 
     PCollection<Internal> readResponses =
         requests

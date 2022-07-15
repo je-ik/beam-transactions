@@ -16,6 +16,7 @@
 package cz.datadriven.beam.transaction;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.Lists;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal;
 import cz.datadriven.beam.transaction.proto.InternalOuterClass.Internal.KeyValue;
@@ -91,8 +92,8 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
   @VisibleForTesting
   static class VerifyTransactionsFn extends DoFn<KV<Void, List<Internal>>, Internal> {
 
-    @StateId("seqId")
-    final StateSpec<MapState<String, KV<Long, Long>>> lastWriteSeqIdSpec = StateSpecs.map();
+    @StateId("lastWrite")
+    final StateSpec<MapState<String, Long>> lastWriteSeqIdSpec = StateSpecs.map();
 
     private final long cleanupIntervalMs;
     private long lastCleanupStamp;
@@ -110,14 +111,14 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     public void process(
         @Element KV<Void, List<Internal>> element,
         @Timestamp Instant timestamp,
-        @StateId("seqId") MapState<String, KV<Long, Long>> lastWriteSeqId,
+        @StateId("lastWrite") MapState<String, Long> lastWrite,
         OutputReceiver<Internal> output) {
 
       List<Internal> actions = Objects.requireNonNull(element.getValue());
       Internal commit = getCommitIfPresent(actions);
       if (commit != null) {
-        if (verifyNoConflict(actions, commit.getSeqId(), timestamp, lastWriteSeqId)) {
-          flushWrites(actions, commit.getSeqId(), timestamp, lastWriteSeqId);
+        if (verifyNoConflict(actions, timestamp, lastWrite)) {
+          flushWrites(actions, timestamp, lastWrite);
           output.output(commit.toBuilder().setStatus(200).build());
         } else {
           output.output(commit.toBuilder().setStatus(412).build());
@@ -126,74 +127,58 @@ public class VerifyTransactions extends PTransform<PCollection<Internal>, PColle
     }
 
     private void flushWrites(
-        List<Internal> actions,
-        long seqId,
-        Instant timestamp,
-        MapState<String, KV<Long, Long>> lastWriteSeqId) {
+        List<Internal> actions, Instant timestamp, MapState<String, Long> lastWriteSeqId) {
 
       actions
           .stream()
           .filter(a -> a.getRequest().getType().equals(Type.COMMIT))
           .flatMap(a -> a.getKeyValueList().stream())
           .distinct()
-          .forEach(kv -> lastWriteSeqId.put(kv.getKey(), KV.of(seqId, timestamp.getMillis())));
+          .forEach(kv -> lastWriteSeqId.put(kv.getKey(), timestamp.getMillis()));
     }
 
     private boolean verifyNoConflict(
-        List<Internal> actions,
-        long commitSeqId,
-        Instant actionStamp,
-        MapState<String, KV<Long, Long>> lastWriteSeqId) {
+        List<Internal> actions, Instant actionStamp, MapState<String, Long> lastWrite) {
 
       // caching
       actions
           .stream()
           .flatMap(a -> a.getKeyValueList().stream().map(KeyValue::getKey))
           .distinct()
-          .forEach(k -> lastWriteSeqId.get(k).readLater());
+          .forEach(k -> lastWrite.get(k).readLater());
 
       if (actions
           .stream()
           .flatMap(i -> i.getKeyValueList().stream())
-          .noneMatch(kv -> kv.getSeqId() != 0)) {
+          .noneMatch(kv -> kv.getTs() != 0)) {
         // if we are missing a read information, we reject the transaction
         // this is due to requiring checkpoint only for COMMIT requests, we can therefore miss some
         // reads, which would lead to inconsistencies
         return false;
       }
 
-      return actions
-          .stream()
-          .allMatch(a -> isValidRead(a, commitSeqId, actionStamp, lastWriteSeqId));
+      return actions.stream().allMatch(a -> isValidRead(a, actionStamp, lastWrite));
     }
 
     private boolean isValidRead(
-        Internal action,
-        long actionSeqId,
-        Instant actionStamp,
-        MapState<String, KV<Long, Long>> lastWriteSeqId) {
+        Internal action, Instant actionStamp, MapState<String, Long> lastWrite) {
 
       return action
           .getKeyValueList()
           .stream()
-          .allMatch(kv -> isValidKvAccess(actionSeqId, actionStamp, lastWriteSeqId, kv));
+          .allMatch(kv -> isValidKvAccess(actionStamp, lastWrite, kv));
     }
 
     private boolean isValidKvAccess(
-        long actionSeqId,
-        Instant actionStamp,
-        MapState<String, KV<Long, Long>> lastWriteSeqId,
-        KeyValue kv) {
+        Instant actionStamp, MapState<String, Long> lastWrite, KeyValue kv) {
 
-      boolean isRead = kv.getSeqId() != 0;
-      @Nullable KV<Long, Long> lastWrite = lastWriteSeqId.get(kv.getKey()).read();
-      if (lastWrite == null) {
-        return true;
-      }
+      boolean isRead = kv.getTs() != 0;
+      long lastWriteStamp =
+          MoreObjects.firstNonNull(lastWrite.get(kv.getKey()).read(), Long.MIN_VALUE);
       if (isRead) {
-        return kv.getSeqId() == lastWrite.getKey();
+        return lastWriteStamp == Long.MIN_VALUE || kv.getTs() == lastWriteStamp;
       }
-      return actionSeqId > lastWrite.getKey() && actionStamp.getMillis() > lastWrite.getValue();
+      return actionStamp.getMillis() > lastWriteStamp;
     }
 
     @Nullable

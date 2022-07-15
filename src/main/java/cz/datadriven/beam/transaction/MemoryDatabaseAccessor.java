@@ -43,13 +43,16 @@ public class MemoryDatabaseAccessor implements DatabaseAccessor {
 
   @Override
   public void set(String key, Value value) {
-    Preconditions.checkState(value.getSeqId() > 0L);
+    Preconditions.checkState(value.getStamp() > 0L);
     DATA.get(uuid)
         .compute(
             key,
             (k, v) -> {
               Preconditions.checkState(
-                  v == null || v.getSeqId() < value.getSeqId() && v.getStamp() < value.getStamp());
+                  v == null || v.getStamp() < value.getStamp(),
+                  "Invalid overwrite of value %s, last %s",
+                  value,
+                  v);
               return value;
             });
   }

@@ -17,12 +17,18 @@ package cz.datadriven.beam.transaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import javax.management.InstanceAlreadyExistsException;
+import javax.management.MBeanRegistrationException;
+import javax.management.MalformedObjectNameException;
+import javax.management.NotCompliantMBeanException;
 import org.junit.jupiter.api.Test;
 
 public class TransactionGeneratorTest {
 
   @Test
-  void testMetrics() {
+  void testMetrics()
+      throws MalformedObjectNameException, NotCompliantMBeanException,
+          InstanceAlreadyExistsException, MBeanRegistrationException {
     TransactionGenerator app =
         new TransactionGenerator("localhost:1234", "localhost", 100, 10000, 10);
     for (int i = 0; i < 150; i++) {

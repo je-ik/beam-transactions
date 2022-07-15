@@ -62,9 +62,13 @@ public class DatabaseRead extends PTransform<PCollection<Internal>, PCollection<
         @Element KV<Integer, Iterable<Internal>> element, OutputReceiver<Internal> output) {
 
       Iterable<Internal> requests = Objects.requireNonNull(element.getValue());
-      Map<Long, List<String>> grouped =
+      Map<String, List<String>> grouped =
           StreamSupport.stream(requests.spliterator(), false)
-              .flatMap(r -> r.getKeyValueList().stream().map(k -> KV.of(r.getSeqId(), k.getKey())))
+              .flatMap(
+                  r ->
+                      r.getKeyValueList()
+                          .stream()
+                          .map(k -> KV.of(r.getTransactionId(), k.getKey())))
               .collect(
                   Collectors.groupingBy(
                       KV::getKey, Collectors.mapping(KV::getValue, Collectors.toList())));
@@ -78,12 +82,10 @@ public class DatabaseRead extends PTransform<PCollection<Internal>, PCollection<
                   Collectors.toMap(
                       KV::getKey,
                       kv ->
-                          kv.getValue() != null
-                              ? kv.getValue()
-                              : new Value(0.0, -1L, Long.MIN_VALUE)));
+                          kv.getValue() != null ? kv.getValue() : new Value(0.0, Long.MIN_VALUE)));
       for (Internal r : requests) {
         Internal.Builder builder = r.toBuilder().clearKeyValue();
-        List<String> query = Objects.requireNonNull(grouped.get(r.getSeqId()));
+        List<String> query = Objects.requireNonNull(grouped.get(r.getTransactionId()));
         query.forEach(
             q -> {
               Value value = resolved.get(q);
@@ -91,7 +93,7 @@ public class DatabaseRead extends PTransform<PCollection<Internal>, PCollection<
                   Internal.KeyValue.newBuilder()
                       .setKey(q)
                       .setValue(value.getAmount())
-                      .setSeqId(value.getSeqId()));
+                      .setTs(value.getStamp()));
             });
         output.output(builder.build());
       }

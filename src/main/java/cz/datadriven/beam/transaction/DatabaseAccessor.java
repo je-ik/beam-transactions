@@ -26,7 +26,6 @@ public interface DatabaseAccessor extends Serializable, Closeable {
   @lombok.Value
   class Value {
     double amount;
-    long seqId;
     long stamp;
   }
 
