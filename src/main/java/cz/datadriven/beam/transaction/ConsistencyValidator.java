@@ -44,20 +44,14 @@ public class ConsistencyValidator {
   private static void verifyWithCluster(Cluster cluster) {
     double sum = 0.0;
     long rows = 0;
-    long maxSeqId = 0L;
     try (Session session = cluster.newSession()) {
-      ResultSet result = session.execute("SELECT amount, seqId FROM beam.amounts");
+      ResultSet result = session.execute("SELECT amount FROM beam.amounts");
       for (Row r : result) {
         sum += r.getDouble(0);
         rows++;
-        long seqId = r.getLong(1);
-        if (maxSeqId < seqId) {
-          maxSeqId = seqId;
-        }
       }
     }
-    System.out.printf(
-        "Sum of all amounts equals to: %f, rows: %d, maxSeqId: %d\n", sum, rows, maxSeqId);
+    System.out.printf("Sum of all amounts equals to: %f, rows: %d\n", sum, rows);
   }
 
   private static void usage() {

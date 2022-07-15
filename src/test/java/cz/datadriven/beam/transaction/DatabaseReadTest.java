@@ -32,11 +32,10 @@ public class DatabaseReadTest {
   @Test
   void testRead() {
     DatabaseAccessor accessor = new MemoryDatabaseAccessor();
-    long now = System.currentTimeMillis();
-    accessor.set("1", new DatabaseAccessor.Value(1.0, 1L, now));
-    accessor.set("2", new DatabaseAccessor.Value(2.0, 2L, now));
-    accessor.set("3", new DatabaseAccessor.Value(3.0, 3L, now));
-    List<Internal> inputs = Arrays.asList(newRequest(1L, "1", "3"), newRequest(2L, "2", "4"));
+    accessor.set("1", new DatabaseAccessor.Value(1.0, 1L));
+    accessor.set("2", new DatabaseAccessor.Value(2.0, 2L));
+    accessor.set("3", new DatabaseAccessor.Value(3.0, 3L));
+    List<Internal> inputs = Arrays.asList(newRequest("1", "1", "3"), newRequest("2", "2", "4"));
     Pipeline pipeline = Pipeline.create();
     PCollection<String> result =
         pipeline
@@ -48,17 +47,18 @@ public class DatabaseReadTest {
                         e ->
                             Iterables.transform(
                                 e.getKeyValueList(),
-                                kv -> e.getSeqId() + ":" + kv.getKey() + "=" + kv.getValue())));
+                                kv -> kv.getTs() + ":" + kv.getKey() + "=" + kv.getValue())));
 
-    PAssert.that(result).containsInAnyOrder("1:1=1.0", "1:3=3.0", "2:2=2.0", "2:4=0.0");
+    PAssert.that(result)
+        .containsInAnyOrder("1:1=1.0", "3:3=3.0", "2:2=2.0", Long.MIN_VALUE + ":4=0.0");
 
     pipeline.run();
   }
 
-  private Internal newRequest(long seqId, String key, String... other) {
+  private Internal newRequest(String transactionId, String key, String... other) {
     Internal.Builder builder =
         Internal.newBuilder()
-            .setSeqId(seqId)
+            .setTransactionId(transactionId)
             .addKeyValue(Internal.KeyValue.newBuilder().setKey(key));
     for (String k : other) {
       builder = builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(k));

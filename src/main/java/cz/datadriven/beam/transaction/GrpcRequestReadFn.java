@@ -241,8 +241,11 @@ public class GrpcRequestReadFn extends DoFn<byte[], Internal> {
   }
 
   private Internal toInternal(Request request) {
-    Builder builder =
-        Internal.newBuilder().setRequest(request).setTransactionId(request.getTransactionId());
+    String transactionId =
+        request.getTransactionId().isEmpty()
+            ? UUID.randomUUID().toString()
+            : request.getTransactionId();
+    Builder builder = Internal.newBuilder().setRequest(request).setTransactionId(transactionId);
     if (request.getType().equals(Type.READ)) {
       for (String key : request.getReadPayload().getKeyList()) {
         builder.addKeyValue(Internal.KeyValue.newBuilder().setKey(key));

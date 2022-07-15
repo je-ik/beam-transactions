@@ -46,7 +46,6 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            1L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
@@ -54,7 +53,6 @@ public class VerifyTransactionsTest {
     Internal write =
         asInternal(
             "t1",
-            1L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -91,17 +89,19 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
     Internal write =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -126,9 +126,9 @@ public class VerifyTransactionsTest {
                     .via(
                         a ->
                             String.format(
-                                "%s:%d:%d",
-                                a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200");
+                                "%s:%s:%d",
+                                a.getRequest().getType(), a.getTransactionId(), a.getStatus())));
+    PAssert.that(res).containsInAnyOrder("COMMIT:t1:200");
     p.run();
   }
 
@@ -137,27 +137,32 @@ public class VerifyTransactionsTest {
     Internal read =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
     Internal read2 =
         asInternal(
             "t2",
-            3L,
             Request.newBuilder()
                 .setType(Type.READ)
                 .setReadPayload(ReadPayload.newBuilder().addKey("key"))
                 .build(),
             Collections.singletonList(
-                Internal.KeyValue.newBuilder().setKey("key").setValue(1.0).setSeqId(-1L).build()));
-    Internal write =
+                Internal.KeyValue.newBuilder()
+                    .setKey("key")
+                    .setValue(1.0)
+                    .setTs(Long.MIN_VALUE)
+                    .build()));
+    Internal commit =
         asInternal(
             "t1",
-            2L,
             Request.newBuilder()
                 .setType(Type.COMMIT)
                 .setWritePayload(
@@ -166,44 +171,40 @@ public class VerifyTransactionsTest {
                 .build(),
             Collections.singletonList(
                 Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
-    Internal commit2 = asInternal("t2", 3L, Request.newBuilder().setType(Type.COMMIT).build());
-    Instant now = new Instant(0);
+    Internal commit2 =
+        asInternal(
+            "t2",
+            Request.newBuilder()
+                .setType(Type.COMMIT)
+                .setWritePayload(
+                    WritePayload.newBuilder()
+                        .addKeyValue(KeyValue.newBuilder().setKey("key").setValue(2.0)))
+                .build(),
+            Collections.singletonList(
+                Internal.KeyValue.newBuilder().setKey("key").setValue(2.0).build()));
     TestStream<Internal> input =
         TestStream.create(ProtoCoder.of(Internal.getDefaultInstance()))
-            .addElements(TimestampedValue.of(read, now), TimestampedValue.of(read2, now))
-            .advanceWatermarkTo(now)
-            .addElements(TimestampedValue.of(write, now.plus(1)))
-            .advanceWatermarkTo(now.plus(1))
-            .addElements(TimestampedValue.of(commit2, now.plus(3)))
+            .addElements(read, read2, commit, commit2)
             .advanceWatermarkToInfinity();
     Pipeline p = Pipeline.create();
-    PCollection<String> res =
+    PCollection<Integer> res =
         p.apply(input)
             .apply(new VerifyTransactions())
-            .apply(
-                MapElements.into(TypeDescriptors.strings())
-                    .via(
-                        a ->
-                            String.format(
-                                "%s:%d:%d",
-                                a.getRequest().getType(), a.getSeqId(), a.getStatus())));
-    PAssert.that(res).containsInAnyOrder("COMMIT:2:200", "COMMIT:3:412");
+            .apply(MapElements.into(TypeDescriptors.integers()).via(Internal::getStatus));
+    PAssert.that(res).containsInAnyOrder(200, 412);
     p.run();
   }
 
-  private Internal asInternal(String transactionId, long seqId, Request request) {
-    return asInternal(transactionId, seqId, request, null);
+  private Internal asInternal(String transactionId, Request request) {
+    return asInternal(transactionId, request, null);
   }
 
   private Internal asInternal(
-      String transactionId,
-      long seqId,
-      Request request,
-      @Nullable List<Internal.KeyValue> keyValues) {
+      String transactionId, Request request, @Nullable List<Internal.KeyValue> keyValues) {
+
     return Internal.newBuilder()
         .addAllKeyValue(keyValues == null ? Collections.emptyList() : keyValues)
         .setRequest(request.toBuilder().setTransactionId(transactionId))
-        .setSeqId(seqId)
         .setTransactionId(transactionId)
         .build();
   }

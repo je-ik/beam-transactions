@@ -60,10 +60,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
                     a ->
                         a.getKeyValueList()
                             .stream()
-                            .map(
-                                kv ->
-                                    KV.of(
-                                        kv.getKey(), kv.toBuilder().setSeqId(a.getSeqId()).build()))
+                            .map(kv -> KV.of(kv.getKey(), kv))
                             .collect(Collectors.toList())))
         .apply(ParDo.of(new WriteFn(accessor)));
     return PDone.in(input.getPipeline());
@@ -93,7 +90,7 @@ public class DatabaseWrite extends PTransform<PCollection<Internal>, PDone> {
     @ProcessElement
     public void process(@Element KV<String, KeyValue> element, @Timestamp Instant ts) {
       KeyValue value = Objects.requireNonNull(element.getValue());
-      accessor.set(value.getKey(), new Value(value.getValue(), value.getSeqId(), ts.getMillis()));
+      accessor.set(value.getKey(), new Value(value.getValue(), ts.getMillis()));
     }
   }
 }

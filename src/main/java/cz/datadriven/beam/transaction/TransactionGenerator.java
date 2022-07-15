@@ -26,6 +26,8 @@ import cz.datadriven.beam.transaction.proto.Server.Request;
 import cz.datadriven.beam.transaction.proto.Server.Request.Type;
 import cz.datadriven.beam.transaction.proto.Server.Response;
 import cz.datadriven.beam.transaction.proto.Server.WritePayload;
+import java.beans.ConstructorProperties;
+import java.lang.management.ManagementFactory;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.Executors;
@@ -33,14 +35,93 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import javax.management.InstanceAlreadyExistsException;
+import javax.management.MBeanRegistrationException;
+import javax.management.MBeanServer;
+import javax.management.MalformedObjectNameException;
+import javax.management.NotCompliantMBeanException;
+import javax.management.ObjectName;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class TransactionGenerator {
 
   private static final int REPORT_INTERVAL = 5;
+  private static final MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
 
-  public static void main(String[] args) {
+  public interface MetricsMBean {
+    double getLatencyAvg();
+
+    double getLatencyStddev();
+
+    double getLatencyMedian();
+
+    double getLatency99();
+
+    double getLatency999();
+
+    double getCommittedPerSec();
+
+    double getRejectedPerSec();
+  }
+
+  @Data
+  public static class Metrics implements MetricsMBean {
+    double latencyAvg;
+    double latencyStddev;
+    double latencyMedian;
+    double latency99;
+    double latency999;
+    double committedPerSec;
+    double rejectedPerSec;
+
+    private Metrics() {
+      this(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    }
+
+    @ConstructorProperties({
+      "latencyAvg",
+      "latencyStddev",
+      "latencyMedian",
+      "latency99",
+      "latency999",
+      "committedPerSec",
+      "rejectedPerSec"
+    })
+    public Metrics(
+        double latencyAvg,
+        double latencyStddev,
+        double latencyMedian,
+        double latency99,
+        double latency999,
+        double committedPerSec,
+        double rejectedPerSec) {
+      this.latencyAvg = latencyAvg;
+      this.latencyStddev = latencyStddev;
+      this.latencyMedian = latencyMedian;
+      this.latency99 = latency99;
+      this.latency999 = latency999;
+      this.committedPerSec = committedPerSec;
+      this.rejectedPerSec = rejectedPerSec;
+    }
+
+    void log() {
+      log.info(
+          "Latency avg, stddev, median, 99th pct, 99.9th pct:{} {} {} {} {}",
+          latencyAvg,
+          latencyStddev,
+          latencyMedian,
+          latency99,
+          latency999);
+      log.info("Committed avg per sec {}", committedPerSec);
+      log.info("Rejected avg per sec {}", rejectedPerSec);
+    }
+  }
+
+  public static void main(String[] args)
+      throws MalformedObjectNameException, NotCompliantMBeanException,
+          InstanceAlreadyExistsException, MBeanRegistrationException {
     if (args.length < 2) {
       usage();
     }
@@ -64,7 +145,8 @@ public class TransactionGenerator {
 
   private static void usage() {
     System.err.printf(
-        "Usage: %s <grpc_address> <response_host>\n", TransactionGenerator.class.getName());
+        "Usage: %s <grpc_address> <response_host> [<num_clients> [<transaction_timeout>]]\n",
+        TransactionGenerator.class.getName());
     System.exit(1);
   }
 
@@ -73,7 +155,7 @@ public class TransactionGenerator {
   private final String responseHost;
   private final int numClients;
   private final int numKeys;
-  private int transactionTimeoutSeconds;
+  private final int transactionTimeoutSeconds;
 
   private final SlidingTimeWindowReservoir latency =
       new SlidingTimeWindowReservoir(30, TimeUnit.SECONDS);
@@ -82,12 +164,16 @@ public class TransactionGenerator {
   private final SlidingTimeWindowReservoir rejected =
       new SlidingTimeWindowReservoir(30, TimeUnit.SECONDS);
 
+  private final Metrics metrics = new Metrics();
+
   public TransactionGenerator(
       String address,
       String responseHost,
       int numClients,
       int numKeys,
-      int transactionTimeoutSeconds) {
+      int transactionTimeoutSeconds)
+      throws MalformedObjectNameException, NotCompliantMBeanException,
+          InstanceAlreadyExistsException, MBeanRegistrationException {
 
     String[] parts = address.split(":");
     Preconditions.checkArgument(parts.length == 2, "Invalid host:port %s", address);
@@ -97,30 +183,33 @@ public class TransactionGenerator {
     this.numClients = numClients;
     this.numKeys = numKeys;
     this.transactionTimeoutSeconds = transactionTimeoutSeconds;
+
+    ObjectName mxbeanName =
+        new ObjectName(
+            "cz.datadriven.beam.transaction.TransactionGenerator.metrics:type="
+                + metrics.getClass().getSimpleName());
+    mbs.registerMBean(metrics, mxbeanName);
   }
 
   private void run() {
     ScheduledExecutorService executor = Executors.newScheduledThreadPool(numClients + 1);
     executor.scheduleAtFixedRate(
-        this::printMetrics, REPORT_INTERVAL, REPORT_INTERVAL, TimeUnit.SECONDS);
+        this::reportMetrics, REPORT_INTERVAL, REPORT_INTERVAL, TimeUnit.SECONDS);
     for (int i = 0; i < numClients; i++) {
       executor.execute(this::runClient);
     }
   }
 
-  private void printMetrics() {
-    final Snapshot latencySnapshot = latency.getSnapshot();
-    final Snapshot committedSnapshot = committed.getSnapshot();
-    final Snapshot rejectedSnapshot = rejected.getSnapshot();
-    log.info(
-        "Latency avg, stddev, median, 99th pct, 99.9th pct:{} {} {} {} {}",
-        latencySnapshot.getMean(),
-        latencySnapshot.getStdDev(),
-        latencySnapshot.getMedian(),
-        latencySnapshot.get99thPercentile(),
-        latencySnapshot.get999thPercentile());
-    log.info("Committed avg per sec {}", committedSnapshot.getValues().length / 30.);
-    log.info("Rejected avg per sec {}", rejectedSnapshot.getValues().length / 30.);
+  private void reportMetrics() {
+    Snapshot snapshot = latency.getSnapshot();
+    metrics.setLatencyAvg(snapshot.getMean());
+    metrics.setLatencyStddev(snapshot.getStdDev());
+    metrics.setLatencyMedian(snapshot.getMedian());
+    metrics.setLatency99(snapshot.get99thPercentile());
+    metrics.setLatency999(snapshot.get999thPercentile());
+    metrics.setCommittedPerSec(committed.getSnapshot().getValues().length / 30.0);
+    metrics.setRejectedPerSec(rejected.getSnapshot().getValues().length / 30.0);
+    metrics.log();
   }
 
   private void runClient() {
