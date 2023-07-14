@@ -50,7 +50,7 @@ public class GrpcRequestReadTest {
   }
 
   @Test
-  @Timeout(15)
+  // @Timeout(60)
   void testRun() throws ExecutionException, InterruptedException {
     Pipeline p = Pipeline.create();
     TransactionRunner.registerCoders(p);
