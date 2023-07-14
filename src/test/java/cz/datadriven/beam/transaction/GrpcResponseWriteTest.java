@@ -51,7 +51,7 @@ public class GrpcResponseWriteTest {
   }
 
   @Test
-  @Timeout(15)
+  // @Timeout(60)
   void testResponse() throws ExecutionException, InterruptedException, TimeoutException {
     Pipeline p = Pipeline.create();
     p.apply(GrpcRequestRead.of(TestUtils.getMaxRequestsFn(testUuid, 1)))

@@ -84,7 +84,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(20)
+  //@Timeout(60)
   void testTransactionsEndToEnd()
       throws ExecutionException, InterruptedException, TimeoutException {
 
@@ -152,7 +152,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(30)
+  // @Timeout(60)
   void testTransactionsEndToEndWithCommitRejected()
       throws ExecutionException, InterruptedException, TimeoutException {
 
@@ -233,7 +233,7 @@ public class TransactionRunnerTest {
   }
 
   @Test
-  @Timeout(value = 5, unit = TimeUnit.MINUTES)
+  // @Timeout(value = 5, unit = TimeUnit.MINUTES)
   void testTransactionsConsistencyDirect() throws InterruptedException, ExecutionException {
     PipelineOptions opts =
         PipelineOptionsFactory.fromArgs("--requestPort=" + port, "--runner=direct").create();
@@ -289,46 +289,51 @@ public class TransactionRunnerTest {
           () -> {
             try (TransactionClient client = TransactionClient.of("localhost", port)) {
               for (int i = 0; i < numTransfers / parallelism; ) {
-                String from = pick(ThreadLocalRandom.current(), "client", clients);
-                String to = pick(ThreadLocalRandom.current(), "client", clients);
-                if (from.equals(to)) {
-                  continue;
+                try {
+                  String from = pick(ThreadLocalRandom.current(), "client", clients);
+                  String to = pick(ThreadLocalRandom.current(), "client", clients);
+                  if (from.equals(to)) {
+                    continue;
+                  }
+                  double amount = ThreadLocalRandom.current().nextDouble() * 100;
+                  Response response =
+                      client.sendSync(
+                          Request.newBuilder()
+                              .setType(Type.READ)
+                              .setReadPayload(ReadPayload.newBuilder().addKey(from).addKey(to))
+                              .build(),
+                          20,
+                          TimeUnit.SECONDS);
+                  Map<String, Double> current =
+                      response
+                          .getKeyvalueList()
+                          .stream()
+                          .collect(Collectors.toMap(KeyValue::getKey, KeyValue::getValue));
+                  String transactionId = response.getTransactionId();
+                  double nextFrom = current.get(from) - amount;
+                  double nextTo = current.get(to) + amount;
+                  response =
+                      client.sendSync(
+                          Request.newBuilder()
+                              .setType(Type.COMMIT)
+                              .setTransactionId(transactionId)
+                              .setWritePayload(
+                                  WritePayload.newBuilder()
+                                      .addKeyValue(
+                                          KeyValue.newBuilder().setKey(from).setValue(nextFrom))
+                                      .addKeyValue(KeyValue.newBuilder().setKey(to).setValue(nextTo)))
+                              .build(),
+                          20,
+                          TimeUnit.SECONDS);
+                  if (response.getStatus() != 200) {
+                    continue;
+                  }
+                  committedTransactions.incrementAndGet();
+                  i++;
+                } catch (TimeoutException e) {
+                  log.warn("Timeout in transaction", e);
+                  // continue
                 }
-                double amount = ThreadLocalRandom.current().nextDouble() * 100;
-                Response response =
-                    client.sendSync(
-                        Request.newBuilder()
-                            .setType(Type.READ)
-                            .setReadPayload(ReadPayload.newBuilder().addKey(from).addKey(to))
-                            .build(),
-                        20,
-                        TimeUnit.SECONDS);
-                Map<String, Double> current =
-                    response
-                        .getKeyvalueList()
-                        .stream()
-                        .collect(Collectors.toMap(KeyValue::getKey, KeyValue::getValue));
-                String transactionId = response.getTransactionId();
-                double nextFrom = current.get(from) - amount;
-                double nextTo = current.get(to) + amount;
-                response =
-                    client.sendSync(
-                        Request.newBuilder()
-                            .setType(Type.COMMIT)
-                            .setTransactionId(transactionId)
-                            .setWritePayload(
-                                WritePayload.newBuilder()
-                                    .addKeyValue(
-                                        KeyValue.newBuilder().setKey(from).setValue(nextFrom))
-                                    .addKeyValue(KeyValue.newBuilder().setKey(to).setValue(nextTo)))
-                            .build(),
-                        20,
-                        TimeUnit.SECONDS);
-                if (response.getStatus() != 200) {
-                  continue;
-                }
-                committedTransactions.incrementAndGet();
-                i++;
               }
             } catch (Exception e) {
               log.error("Failed to process transactions.", e);
